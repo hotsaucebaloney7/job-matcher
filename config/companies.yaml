@@ -1,0 +1,29 @@
+# Target company ATS board slugs for daily polling
+# Greenhouse endpoint: https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true
+# Lever endpoint:      https://api.lever.co/v0/postings/{slug}?mode=json
+
+greenhouse:
+  - slug: anthropic
+    name: Anthropic
+  - slug: scaleai
+    name: Scale AI
+  - slug: databricks
+    name: Databricks
+  - slug: stripe
+    name: Stripe
+  - slug: cloudflare
+    name: Cloudflare
+  - slug: gitlab
+    name: GitLab
+  - slug: twilio
+    name: Twilio
+  - slug: reddit
+    name: Reddit
+
+lever:
+  - slug: palantir
+    name: Palantir
+  - slug: mistral
+    name: Mistral AI
+  - slug: zoox
+    name: Zoox
