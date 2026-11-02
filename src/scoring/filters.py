@@ -17,11 +17,11 @@ EXCLUDED_TITLE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# 2. Target role families (Primary + Accepted Variations)
+# 2. Target role families (Primary + Accepted Variations + Federal Quantitative Series)
 TARGET_TITLE_PATTERN = re.compile(
     r"(?:data\s+scien|ai\s+engineer|artificial\s+intelligence\s+engineer|"
     r"machine\s+learning|ml\s+engineer|applied\s+ai|data\s+engineer|"
-    r"ml\s*ops|genai|generative\s+ai)",
+    r"ml\s*ops|genai|generative\s+ai|operations\s+research\s+analyst|statistician)",
     re.IGNORECASE,
 )
 

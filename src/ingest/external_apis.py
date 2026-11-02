@@ -400,21 +400,28 @@ def poll_usajobs(
         {
             "label": "Raleigh / RTP (25 mi)",
             "params": {
-                "Keyword": "Data Scientist Artificial Intelligence Machine Learning Data Engineer",
                 "LocationName": "Raleigh, North Carolina",
                 "Radius": "25",
-                "ResultsPerPage": "50",
+                "JobCategoryCode": "1560;1550;1515;1529;1530;2210;0854",
+                "ResultsPerPage": "100",
             },
             "is_remote_query": False,
         },
         {
-            "label": "US Remote (1560 / AI / ML)",
+            "label": "Federal Data Scientist (1560)",
             "params": {
-                "Keyword": "Data Scientist Artificial Intelligence Machine Learning",
-                "RemoteIndicator": "True",
-                "ResultsPerPage": "50",
+                "Keyword": "Data Scientist",
+                "ResultsPerPage": "100",
             },
-            "is_remote_query": True,
+            "is_remote_query": False,
+        },
+        {
+            "label": "Federal AI / Machine Learning",
+            "params": {
+                "Keyword": "Machine Learning",
+                "ResultsPerPage": "100",
+            },
+            "is_remote_query": False,
         },
     ]
 
@@ -448,7 +455,12 @@ def poll_usajobs(
                         for loc in (desc.get("PositionLocation") or [])
                         if isinstance(loc, dict) and loc.get("LocationName")
                     ]
-                    loc_parts = [p for p in [loc_display, ", ".join(pos_locs[:3])] if p]
+                    # Keep any North Carolina / Triangle duty stations plus first 3 locations so Multi-Location jobs match RTP
+                    nc_locs = [
+                        l for l in pos_locs if any(k in l.lower() for k in ("north carolina", ", nc", "raleigh", "durham", "cary", "morrisville"))
+                    ]
+                    selected_locs = list(dict.fromkeys(nc_locs + pos_locs[:3]))
+                    loc_parts = [p for p in [loc_display, ", ".join(selected_locs)] if p]
                     if q["is_remote_query"] or "anywhere in the u.s." in loc_display.lower():
                         loc_parts.insert(0, "Remote - United States")
                     location_raw = " | ".join(dict.fromkeys(loc_parts))
