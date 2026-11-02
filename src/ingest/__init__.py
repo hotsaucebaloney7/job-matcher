@@ -1,0 +1,1 @@
+"""Job feed ingestion layer."""

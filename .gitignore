@@ -1,0 +1,55 @@
+# Visual Studio 2026 / IDE
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.pyproj.user
+
+# Python bytecode & packaging
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Testing & type checking caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# HuggingFace / Sentence-Transformers local cache (if stored locally)
+.cache/
+models/
+
+# Generated daily reports (keep directory via .gitkeep)
+reports/*.md
+
+# OS metadata
+Thumbs.db
+Desktop.ini
+.DS_Store
