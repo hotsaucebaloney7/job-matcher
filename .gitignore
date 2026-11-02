@@ -53,6 +53,7 @@ reports/*.md
 data/*.pdf
 data/*.docx
 data/*.doc
+data/.last_resume_hash
 
 # OS metadata
 Thumbs.db
