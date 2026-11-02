@@ -1,0 +1,98 @@
+# Deterministic Keyword Rubric Configuration (Stage 3.2 - 50% of Composite Score)
+# Each group within a tier can trigger at most once per posting, capped at tier max_points.
+
+tiers:
+  tier_1:
+    name: "Tier 1: Core Pillars"
+    points_per_group: 15
+    max_points: 60
+    groups:
+      Python Ecosystem:
+        - python
+        - pandas
+        - numpy
+      SQL & Databases:
+        - sql
+        - mysql
+        - postgres
+        - postgresql
+        - relational database
+      Cloud Infrastructure:
+        - aws
+        - amazon web services
+        - s3
+        - ec2
+        - rds
+        - sagemaker
+        - bedrock
+        - cloud
+      Core ML / AI:
+        - machine learning
+        - deep learning
+        - artificial intelligence
+        - statistical modeling
+
+  tier_2:
+    name: "Tier 2: High-Value Differentiators"
+    points_per_group: 10
+    max_points: 30
+    groups:
+      Data Engineering:
+        - etl
+        - data pipeline
+        - data engineering
+        - airflow
+        - spark
+        - pyspark
+        - data warehouse
+        - dbt
+      Applied AI / LLMs:
+        - llm
+        - large language model
+        - rag
+        - retrieval augmented
+        - embeddings
+        - vector database
+        - genai
+        - generative ai
+        - agent
+      ML Frameworks:
+        - pytorch
+        - tensorflow
+        - scikit-learn
+        - sklearn
+        - xgboost
+        - huggingface
+        - transformers
+      Backend / APIs:
+        - fastapi
+        - flask
+        - rest api
+        - microservices
+        - sqlalchemy
+
+  tier_3:
+    name: "Tier 3: Credentials & DevOps Bonuses"
+    points_per_group: 5
+    max_points: 10
+    groups:
+      Graduate Degree:
+        - "master's"
+        - "ms in"
+        - "m.s."
+        - phd
+        - "ph.d."
+        - graduate degree
+      Containers & CI/CD:
+        - docker
+        - kubernetes
+        - git
+        - ci/cd
+        - github actions
+        - linux
+      Experimentation:
+        - a/b testing
+        - causal inference
+        - hypothesis testing
+        - time series
+        - bayesian

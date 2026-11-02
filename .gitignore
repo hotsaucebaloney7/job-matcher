@@ -49,6 +49,11 @@ models/
 # Generated daily reports (keep directory via .gitkeep)
 reports/*.md
 
+# Personal resume documents dropped into data/ (keep placeholder/structure)
+data/*.pdf
+data/*.docx
+data/*.doc
+
 # OS metadata
 Thumbs.db
 Desktop.ini

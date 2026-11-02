@@ -1,0 +1,18 @@
+# PLACEHOLDER RESUME — Drop your actual resume (.pdf, .docx, .txt, or .md) into this `data/` folder!
+# If you place ANY .pdf or .docx file in `data/` (or overwrite this `resume.txt`),
+# the Job Matcher will automatically load your real resume at runtime.
+
+Data Scientist & AI Engineer
+Location: Raleigh / Durham / Research Triangle Park (RTP), NC (Open to US Remote & Local)
+
+SUMMARY
+Data Scientist and AI Engineer experienced in building end-to-end machine learning models, applied LLM / RAG pipelines, and scalable data engineering workflows in Python, SQL, and AWS.
+
+TECHNICAL SKILLS
+- Languages & Core Data: Python, Pandas, NumPy, SQL, MySQL, PostgreSQL
+- Machine Learning & AI: PyTorch, Scikit-Learn, XGBoost, Transformers, HuggingFace, LLMs, Retrieval-Augmented Generation (RAG), Embeddings, Vector Databases, Agentic Workflows
+- Data Engineering & Cloud: AWS (S3, EC2, RDS, SageMaker, Bedrock), ETL Data Pipelines, Apache Spark / PySpark, Airflow, dbt
+- Backend, MLOps & Experimentation: FastAPI, REST APIs, SQLAlchemy, Docker, Git, GitHub Actions, Linux, CI/CD, A/B Testing, Causal Inference, Statistical Modeling, Time Series
+
+EDUCATION
+Master of Science (M.S.) in Data Science / Computer Science
