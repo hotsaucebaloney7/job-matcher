@@ -19,7 +19,7 @@ USER_AGENT = "JobMatcher/1.0 (+local-personal-job-search)"
 
 
 def load_companies_config(config_path: Path = DEFAULT_CONFIG_PATH) -> Dict[str, List[Dict[str, str]]]:
-    """Load Greenhouse and Lever company board definitions from YAML."""
+    """Load Greenhouse, Lever, and Ashby company board definitions from YAML."""
     if not config_path.exists():
         raise FileNotFoundError(f"Companies configuration file not found: {config_path}")
     with config_path.open("r", encoding="utf-8") as f:
@@ -27,6 +27,7 @@ def load_companies_config(config_path: Path = DEFAULT_CONFIG_PATH) -> Dict[str, 
     return {
         "greenhouse": data.get("greenhouse", []) or [],
         "lever": data.get("lever", []) or [],
+        "ashby": data.get("ashby", []) or [],
     }
 
 
@@ -170,6 +171,84 @@ def fetch_lever_board(slug: str, company_name: str, session: requests.Session) -
     return matched, len(raw_jobs)
 
 
+def fetch_ashby_board(slug: str, company_name: str, session: requests.Session) -> Tuple[List[Dict[str, Any]], int]:
+    """Fetch and filter jobs from a public Ashby job board API.
+
+    Endpoint:
+        https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true
+    """
+    url = f"https://api.ashbyhq.com/posting-api/job-board/{slug}?includeCompensation=true"
+    resp = session.get(url, timeout=REQUEST_TIMEOUT_SECONDS)
+    resp.raise_for_status()
+    payload = resp.json() or {}
+    raw_jobs = payload.get("jobs", []) or []
+
+    matched: List[Dict[str, Any]] = []
+    for item in raw_jobs:
+        if item.get("isListed") is False:
+            continue
+
+        title = (item.get("title") or "").strip()
+        primary_loc = (item.get("location") or "").strip()
+        workplace_type_hint = (item.get("workplaceType") or "").strip()
+        is_remote = item.get("isRemote") is True
+
+        secondary_locs = [
+            (sec.get("location") or "").strip()
+            for sec in (item.get("secondaryLocations") or [])
+            if isinstance(sec, dict) and sec.get("location")
+        ]
+        loc_parts = [p for p in [primary_loc, ", ".join(secondary_locs), workplace_type_hint] if p]
+        if is_remote and not any("remote" in p.lower() for p in loc_parts):
+            loc_parts.append("Remote")
+        location_raw = " | ".join(dict.fromkeys(loc_parts))
+
+        desc_plain = item.get("descriptionPlain") or strip_html(item.get("descriptionHtml") or "")
+
+        passed, workplace_type, job_hash, _ = evaluate_posting(
+            company=company_name,
+            title=title,
+            location_raw=location_raw,
+            description_text=desc_plain,
+        )
+        if not passed:
+            continue
+
+        # Parse optional compensation bounds if annual USD salary is provided
+        salary_min: Optional[int] = None
+        salary_max: Optional[int] = None
+        comp = item.get("compensation") or {}
+        for summary_comp in (comp.get("summaryComponents") or []):
+            if (summary_comp.get("compensationType") == "Salary") and (
+                summary_comp.get("interval") in ("1 YEAR", "YEARLY", "Annual", None)
+            ):
+                low = summary_comp.get("minValue")
+                high = summary_comp.get("maxValue")
+                if isinstance(low, (int, float)) and low >= 30000:
+                    salary_min = int(low)
+                if isinstance(high, (int, float)) and high >= 30000:
+                    salary_max = int(high)
+
+        matched.append(
+            {
+                "job_hash": job_hash,
+                "source": "ashby",
+                "external_id": str(item.get("id")) if item.get("id") is not None else None,
+                "company": company_name,
+                "title": title,
+                "location_raw": primary_loc or location_raw,
+                "workplace_type": workplace_type,
+                "salary_min": salary_min,
+                "salary_max": salary_max,
+                "url": item.get("jobUrl") or item.get("applyUrl") or "",
+                "description_text": desc_plain,
+                "date_posted": _parse_iso_datetime(item.get("publishedAt")),
+            }
+        )
+
+    return matched, len(raw_jobs)
+
+
 def poll_all_ats(
     config_path: Path = DEFAULT_CONFIG_PATH,
     console: Optional[Console] = None,
@@ -219,6 +298,23 @@ def poll_all_ats(
                 )
                 if console:
                     console.print(f"[yellow]Warning:[/yellow] Failed polling Lever ({name}): {exc}")
+
+        for entry in cfg.get("ashby", []):
+            slug = entry["slug"]
+            name = entry.get("name", slug)
+            try:
+                matched, raw_count = fetch_ashby_board(slug, name, session)
+                for job in matched:
+                    deduped.setdefault(job["job_hash"], job)
+                stats.append(
+                    {"ats": "Ashby", "company": name, "raw": raw_count, "matched": len(matched), "status": "OK"}
+                )
+            except Exception as exc:
+                stats.append(
+                    {"ats": "Ashby", "company": name, "raw": 0, "matched": 0, "status": f"ERROR: {exc}"}
+                )
+                if console:
+                    console.print(f"[yellow]Warning:[/yellow] Failed polling Ashby ({name}): {exc}")
 
     return list(deduped.values()), stats
 

@@ -22,6 +22,7 @@ from src.exporters.markdown_digest import (
 from src.exporters.notion_sync import is_notion_configured, sync_to_notion
 from src.ingest.adzuna_client import poll_adzuna
 from src.ingest.ats_poller import DEFAULT_CONFIG_PATH, poll_all_ats
+from src.ingest.external_apis import poll_jsearch_rapidapi, poll_remotive, poll_the_muse
 from src.scoring.embed_scorer import DEFAULT_DATA_DIR, EmbeddingScorer, score_unscored_postings
 from src.scoring.keyword_scorer import DEFAULT_KEYWORDS_PATH, KeywordScorer
 
@@ -44,21 +45,34 @@ def run_pipeline(
     out = console or Console()
     out.rule("[bold cyan]Job Matcher Pipeline[/bold cyan]")
 
-    # Stage 1: Ingestion (Direct ATS Poller + Optional Adzuna Aggregator)
+    # Stage 1: Ingestion (Direct ATS Poller + Remotive + The Muse + Adzuna + JSearch)
     merged_postings: Dict[str, dict] = {}
     if not skip_ingest:
-        out.print("[bold cyan]Stage 1:[/bold cyan] Polling Greenhouse, Lever, and Adzuna feeds...")
+        out.print("[bold cyan]Stage 1:[/bold cyan] Polling Greenhouse, Lever, Ashby, Remotive, The Muse, Adzuna & JSearch...")
         ats_jobs, ats_stats = poll_all_ats(config_path=companies_config, console=out)
         for job in ats_jobs:
             merged_postings.setdefault(job["job_hash"], job)
 
-        adzuna_jobs, _ = poll_adzuna(console=out)
+        remotive_jobs, remotive_stats = poll_remotive(console=out)
+        for job in remotive_jobs:
+            merged_postings.setdefault(job["job_hash"], job)
+
+        muse_jobs, muse_stats = poll_the_muse(console=out)
+        for job in muse_jobs:
+            merged_postings.setdefault(job["job_hash"], job)
+
+        adzuna_jobs, adzuna_stats = poll_adzuna(console=out)
         for job in adzuna_jobs:
             merged_postings.setdefault(job["job_hash"], job)
 
-        total_raw = sum(s["raw"] for s in ats_stats)
+        jsearch_jobs, jsearch_stats = poll_jsearch_rapidapi(console=out)
+        for job in jsearch_jobs:
+            merged_postings.setdefault(job["job_hash"], job)
+
+        all_stats = ats_stats + remotive_stats + muse_stats + adzuna_stats + jsearch_stats
+        total_raw = sum(s["raw"] for s in all_stats)
         out.print(
-            f"  • Scanned [bold]{total_raw}[/bold] raw ATS postings -> "
+            f"  • Scanned [bold]{total_raw}[/bold] raw postings across all sources -> "
             f"[bold green]{len(merged_postings)}[/bold green] unique target matches passed knockout filters."
         )
     else:

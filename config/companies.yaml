@@ -27,3 +27,23 @@ lever:
     name: Mistral AI
   - slug: zoox
     name: Zoox
+
+ashby:
+  - slug: openai
+    name: OpenAI
+  - slug: langchain
+    name: LangChain
+  - slug: cohere
+    name: Cohere
+  - slug: perplexity
+    name: Perplexity
+  - slug: notion
+    name: Notion
+  - slug: linear
+    name: Linear
+  - slug: ramp
+    name: Ramp
+  - slug: elevenlabs
+    name: ElevenLabs
+  - slug: modal
+    name: Modal

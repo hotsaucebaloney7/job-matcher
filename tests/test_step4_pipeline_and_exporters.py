@@ -15,6 +15,8 @@ from src.exporters.markdown_digest import (
 )
 from src.exporters.notion_sync import sync_to_notion
 from src.ingest.adzuna_client import poll_adzuna
+from src.ingest.ats_poller import fetch_ashby_board
+from src.ingest.external_apis import poll_jsearch_rapidapi, poll_remotive, poll_the_muse
 from src.main import run_pipeline
 from src.scoring.embed_scorer import EmbeddingScorer
 from src.scoring.filters import compute_job_hash
@@ -232,3 +234,114 @@ class TestEndToEndPipelineOrchestrator:
         md_text = report_path.read_text(encoding="utf-8")
         assert "RaleighAI" in md_text
         assert "`[LOCAL]`" in md_text
+
+
+class TestAshbyAndExternalAggregatorClients:
+    """Verify Ashby ATS parser, Remotive, The Muse, and JSearch (Google for Jobs) clients."""
+
+    def test_fetch_ashby_board_filters_and_parses_compensation(self) -> None:
+        mock_session = MagicMock()
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "jobs": [
+                {
+                    "id": "ash-1",
+                    "title": "Applied AI Engineer",
+                    "isListed": True,
+                    "isRemote": True,
+                    "location": "United States",
+                    "workplaceType": "Remote",
+                    "jobUrl": "https://jobs.ashbyhq.com/langchain/ash-1",
+                    "descriptionPlain": "2+ years of experience with Python, LangChain, RAG, and LLMs.",
+                    "publishedAt": "2026-11-01T10:00:00Z",
+                    "compensation": {
+                        "summaryComponents": [
+                            {
+                                "compensationType": "Salary",
+                                "interval": "1 YEAR",
+                                "minValue": 160000,
+                                "maxValue": 200000,
+                            }
+                        ]
+                    },
+                }
+            ]
+        }
+        mock_session.get.return_value = mock_resp
+
+        matched, raw_count = fetch_ashby_board("langchain", "LangChain", mock_session)
+        assert raw_count == 1
+        assert len(matched) == 1
+        assert matched[0]["source"] == "ashby"
+        assert matched[0]["salary_min"] == 160000
+        assert matched[0]["salary_max"] == 200000
+
+    def test_poll_remotive_and_the_muse_and_jsearch(self) -> None:
+        mock_session = MagicMock()
+
+        # 1. Remotive mock
+        rem_resp = MagicMock()
+        rem_resp.json.return_value = {
+            "jobs": [
+                {
+                    "id": 501,
+                    "title": "Data Scientist",
+                    "company_name": "RemoteDataCo",
+                    "candidate_required_location": "USA Only",
+                    "url": "https://remotive.com/remote-jobs/data/501",
+                    "description": "<p>2+ years of experience in Python and SQL.</p>",
+                    "publication_date": "2026-11-01T09:00:00",
+                }
+            ]
+        }
+        mock_session.get.return_value = rem_resp
+        rem_jobs, _ = poll_remotive(session=mock_session)
+        assert len(rem_jobs) == 1
+        assert rem_jobs[0]["source"] == "remotive"
+
+        # 2. The Muse mock
+        muse_resp = MagicMock()
+        muse_resp.json.return_value = {
+            "results": [
+                {
+                    "id": 601,
+                    "name": "Machine Learning Engineer",
+                    "company": {"name": "TriangleTech"},
+                    "locations": [{"name": "Raleigh, NC"}],
+                    "contents": "<p>1-3 years of experience with PyTorch and AWS.</p>",
+                    "refs": {"landing_page": "https://www.themuse.com/jobs/601"},
+                }
+            ]
+        }
+        mock_session.get.return_value = muse_resp
+        muse_jobs, _ = poll_the_muse(session=mock_session)
+        assert len(muse_jobs) == 1
+        assert muse_jobs[0]["workplace_type"] == "Local"
+
+        # 3. JSearch (Google for Jobs) mock
+        jsearch_resp = MagicMock()
+        jsearch_resp.json.return_value = {
+            "data": [
+                {
+                    "job_id": "js-1",
+                    "job_title": "AI Engineer",
+                    "employer_name": "RTP BioAI",
+                    "job_city": "Durham",
+                    "job_state": "NC",
+                    "job_country": "US",
+                    "job_is_remote": False,
+                    "job_description": "3+ years of experience building LLM and RAG pipelines.",
+                    "job_min_salary": 135000,
+                    "job_max_salary": 165000,
+                    "job_salary_period": "YEAR",
+                    "job_apply_link": "https://example.com/apply/js-1",
+                    "job_required_experience": {"required_experience_in_months": 36},
+                }
+            ]
+        }
+        mock_session.get.return_value = jsearch_resp
+        js_jobs, _ = poll_jsearch_rapidapi(rapidapi_key="test_rapid_key", session=mock_session)
+        assert len(js_jobs) == 1
+        assert js_jobs[0]["company"] == "RTP BioAI"
+        assert js_jobs[0]["salary_min"] == 135000
+
