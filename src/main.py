@@ -22,7 +22,7 @@ from src.exporters.markdown_digest import (
 from src.exporters.notion_sync import is_notion_configured, sync_to_notion
 from src.ingest.adzuna_client import poll_adzuna
 from src.ingest.ats_poller import DEFAULT_CONFIG_PATH, poll_all_ats
-from src.ingest.external_apis import poll_jsearch_rapidapi, poll_remotive, poll_the_muse
+from src.ingest.external_apis import poll_jsearch_rapidapi, poll_remotive, poll_the_muse, poll_usajobs
 from src.scoring.embed_scorer import DEFAULT_DATA_DIR, EmbeddingScorer, score_unscored_postings
 from src.scoring.keyword_scorer import DEFAULT_KEYWORDS_PATH, KeywordScorer
 
@@ -69,7 +69,11 @@ def run_pipeline(
         for job in jsearch_jobs:
             merged_postings.setdefault(job["job_hash"], job)
 
-        all_stats = ats_stats + remotive_stats + muse_stats + adzuna_stats + jsearch_stats
+        usajobs_jobs, usajobs_stats = poll_usajobs(console=out)
+        for job in usajobs_jobs:
+            merged_postings.setdefault(job["job_hash"], job)
+
+        all_stats = ats_stats + remotive_stats + muse_stats + adzuna_stats + jsearch_stats + usajobs_stats
         total_raw = sum(s["raw"] for s in all_stats)
         out.print(
             f"  • Scanned [bold]{total_raw}[/bold] raw postings across all sources -> "

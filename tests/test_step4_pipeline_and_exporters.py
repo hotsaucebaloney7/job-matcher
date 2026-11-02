@@ -16,7 +16,7 @@ from src.exporters.markdown_digest import (
 from src.exporters.notion_sync import sync_to_notion
 from src.ingest.adzuna_client import poll_adzuna
 from src.ingest.ats_poller import fetch_ashby_board
-from src.ingest.external_apis import poll_jsearch_rapidapi, poll_remotive, poll_the_muse
+from src.ingest.external_apis import poll_jsearch_rapidapi, poll_remotive, poll_the_muse, poll_usajobs
 from src.main import run_pipeline
 from src.scoring.embed_scorer import EmbeddingScorer
 from src.scoring.filters import compute_job_hash
@@ -344,4 +344,36 @@ class TestAshbyAndExternalAggregatorClients:
         assert len(js_jobs) == 1
         assert js_jobs[0]["company"] == "RTP BioAI"
         assert js_jobs[0]["salary_min"] == 135000
+
+        # 4. USAJOBS mock
+        usa_resp = MagicMock()
+        usa_resp.json.return_value = {
+            "SearchResult": {
+                "SearchResultItems": [
+                    {
+                        "MatchedObjectId": "usa-101",
+                        "MatchedObjectDescriptor": {
+                            "PositionTitle": "Data Scientist",
+                            "OrganizationName": "Environmental Protection Agency",
+                            "PositionLocationDisplay": "Durham, North Carolina",
+                            "PositionLocation": [{"LocationName": "Durham, North Carolina"}],
+                            "PositionURI": "https://www.usajobs.gov/job/usa-101",
+                            "PublicationStartDate": "2026-11-01T00:00:00Z",
+                            "PositionRemuneration": [
+                                {"MinimumRange": "95000", "MaximumRange": "128000", "RateIntervalCode": "PA"}
+                            ],
+                            "QualificationSummary": "1-3 years experience with Python, SQL, and statistical modeling.",
+                            "UserArea": {"Details": {"JobSummary": "EPA RTP Data Scientist role."}},
+                        },
+                    }
+                ]
+            }
+        }
+        mock_session.get.return_value = usa_resp
+        usa_jobs, _ = poll_usajobs(api_key="test_usa_key", session=mock_session)
+        assert len(usa_jobs) == 1
+        assert usa_jobs[0]["source"] == "usajobs"
+        assert usa_jobs[0]["workplace_type"] == "Local"
+        assert usa_jobs[0]["salary_min"] == 95000
+        assert usa_jobs[0]["salary_max"] == 128000
 

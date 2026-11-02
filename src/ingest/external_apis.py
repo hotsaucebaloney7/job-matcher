@@ -364,3 +364,174 @@ def poll_jsearch_rapidapi(
             http.close()
 
     return list(deduped.values()), stats
+
+
+def poll_usajobs(
+    api_key: Optional[str] = None,
+    user_email: Optional[str] = None,
+    session: Optional[requests.Session] = None,
+    console: Optional[Console] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Poll the official USAJOBS REST API for Local (Raleigh/RTP) and US-Remote Data/AI roles.
+
+    Requires `USAJOBS_API_KEY` (and `USAJOBS_USER_EMAIL` as User-Agent header) in `.env`.
+    """
+    resolved_key = (api_key if api_key is not None else os.getenv("USAJOBS_API_KEY", "")).strip()
+    resolved_email = (
+        user_email
+        if user_email is not None
+        else os.getenv("USAJOBS_USER_EMAIL", "mrmackelroy@gmail.com")
+    ).strip()
+
+    if not resolved_key:
+        if console:
+            console.print("[dim]USAJOBS: Skipped (USAJOBS_API_KEY not set in .env)[/dim]")
+        return [], []
+
+    url = "https://data.usajobs.gov/api/Search"
+    headers = {
+        "Host": "data.usajobs.gov",
+        "User-Agent": resolved_email,
+        "Authorization-Key": resolved_key,
+        "Accept": "application/json",
+    }
+
+    queries = [
+        {
+            "label": "Raleigh / RTP (25 mi)",
+            "params": {
+                "Keyword": "Data Scientist Artificial Intelligence Machine Learning Data Engineer",
+                "LocationName": "Raleigh, North Carolina",
+                "Radius": "25",
+                "ResultsPerPage": "50",
+            },
+            "is_remote_query": False,
+        },
+        {
+            "label": "US Remote (1560 / AI / ML)",
+            "params": {
+                "Keyword": "Data Scientist Artificial Intelligence Machine Learning",
+                "RemoteIndicator": "True",
+                "ResultsPerPage": "50",
+            },
+            "is_remote_query": True,
+        },
+    ]
+
+    deduped: Dict[str, Dict[str, Any]] = {}
+    stats: List[Dict[str, Any]] = []
+
+    own_session = session is None
+    http = session or requests.Session()
+
+    try:
+        for q in queries:
+            try:
+                resp = http.get(url, headers=headers, params=q["params"], timeout=REQUEST_TIMEOUT_SECONDS)
+                resp.raise_for_status()
+                search_result = (resp.json() or {}).get("SearchResult") or {}
+                raw_items = search_result.get("SearchResultItems") or []
+
+                matched_count = 0
+                for item in raw_items:
+                    desc = item.get("MatchedObjectDescriptor") or {}
+                    title = (desc.get("PositionTitle") or "").strip()
+                    company = (
+                        desc.get("OrganizationName")
+                        or desc.get("DepartmentName")
+                        or "U.S. Federal Government"
+                    ).strip()
+
+                    loc_display = (desc.get("PositionLocationDisplay") or "").strip()
+                    pos_locs = [
+                        (loc.get("LocationName") or "").strip()
+                        for loc in (desc.get("PositionLocation") or [])
+                        if isinstance(loc, dict) and loc.get("LocationName")
+                    ]
+                    loc_parts = [p for p in [loc_display, ", ".join(pos_locs[:3])] if p]
+                    if q["is_remote_query"] or "anywhere in the u.s." in loc_display.lower():
+                        loc_parts.insert(0, "Remote - United States")
+                    location_raw = " | ".join(dict.fromkeys(loc_parts))
+
+                    details = (desc.get("UserArea") or {}).get("Details") or {}
+                    summary = details.get("JobSummary") or ""
+                    duties = details.get("MajorDuties") or []
+                    if isinstance(duties, list):
+                        duties_str = "\n".join(str(d) for d in duties)
+                    else:
+                        duties_str = str(duties)
+                    quals = desc.get("QualificationSummary") or ""
+                    description_text = strip_html(f"{summary}\n{duties_str}\n{quals}")
+
+                    passed, workplace_type, job_hash, _ = evaluate_posting(
+                        company=company,
+                        title=title,
+                        location_raw=location_raw,
+                        description_text=description_text,
+                    )
+                    if not passed:
+                        continue
+
+                    salary_min: Optional[int] = None
+                    salary_max: Optional[int] = None
+                    for rem in (desc.get("PositionRemuneration") or []):
+                        interval = (rem.get("RateIntervalCode") or "").upper()
+                        if interval in ("PA", "PER YEAR", "ANNUAL", ""):
+                            try:
+                                low = float(rem.get("MinimumRange") or 0)
+                                high = float(rem.get("MaximumRange") or 0)
+                                if low >= 30000:
+                                    salary_min = int(low)
+                                if high >= 30000:
+                                    salary_max = int(high)
+                            except (ValueError, TypeError):
+                                pass
+
+                    apply_uris = desc.get("ApplyURI") or []
+                    job_url = desc.get("PositionURI") or (apply_uris[0] if apply_uris else "")
+
+                    deduped.setdefault(
+                        job_hash,
+                        {
+                            "job_hash": job_hash,
+                            "source": "usajobs",
+                            "external_id": str(item.get("MatchedObjectId") or ""),
+                            "company": company,
+                            "title": title,
+                            "location_raw": loc_display or location_raw,
+                            "workplace_type": workplace_type,
+                            "salary_min": salary_min,
+                            "salary_max": salary_max,
+                            "url": job_url,
+                            "description_text": description_text,
+                            "date_posted": _parse_iso_dt(desc.get("PublicationStartDate")),
+                        },
+                    )
+                    matched_count += 1
+
+                stats.append(
+                    {
+                        "ats": "USAJOBS",
+                        "company": q["label"],
+                        "raw": len(raw_items),
+                        "matched": matched_count,
+                        "status": "OK",
+                    }
+                )
+            except Exception as exc:
+                stats.append(
+                    {
+                        "ats": "USAJOBS",
+                        "company": q["label"],
+                        "raw": 0,
+                        "matched": 0,
+                        "status": f"ERROR: {exc}",
+                    }
+                )
+                if console:
+                    console.print(f"[yellow]Warning:[/yellow] USAJOBS ({q['label']}) failed: {exc}")
+    finally:
+        if own_session:
+            http.close()
+
+    return list(deduped.values()), stats
