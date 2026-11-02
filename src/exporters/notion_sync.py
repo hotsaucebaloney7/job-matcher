@@ -115,13 +115,19 @@ def _ensure_database_schema(
                 "select": {
                     "options": [
                         {"name": "New Match", "color": "blue"},
-                        {"name": "Saved", "color": "yellow"},
-                        {"name": "Applied", "color": "green"},
-                        {"name": "Interviewing", "color": "purple"},
-                        {"name": "Archived", "color": "gray"},
+                        {"name": "Want to Apply", "color": "yellow"},
+                        {"name": "Applied", "color": "orange"},
+                        {"name": "Follow Up Needed", "color": "purple"},
+                        {"name": "Interviewing", "color": "green"},
+                        {"name": "Offer", "color": "pink"},
+                        {"name": "Declined / Rejected", "color": "red"},
+                        {"name": "Not Interested", "color": "gray"},
                     ]
                 }
             },
+            "Date Applied": {"date": {}},
+            "Follow-Up Date": {"date": {}},
+            "Contact / Notes": {"rich_text": {}},
             "Salary": {"rich_text": {}},
             "Source": {"select": {}},
             "Location": {"rich_text": {}},
