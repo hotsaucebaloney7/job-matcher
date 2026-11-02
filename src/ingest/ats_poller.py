@@ -70,16 +70,17 @@ def fetch_greenhouse_board(slug: str, company_name: str, session: requests.Sessi
         title = (item.get("title") or "").strip()
         loc_obj = item.get("location") or {}
         location_raw = (loc_obj.get("name") or "").strip()
+        description_text = strip_html(item.get("content") or "")
 
         passed, workplace_type, job_hash, _ = evaluate_posting(
             company=company_name,
             title=title,
             location_raw=location_raw,
+            description_text=description_text,
         )
         if not passed:
             continue
 
-        description_text = strip_html(item.get("content") or "")
         date_posted = _parse_iso_datetime(item.get("first_published") or item.get("updated_at"))
 
         matched.append(
@@ -127,14 +128,6 @@ def fetch_lever_board(slug: str, company_name: str, session: requests.Session) -
         loc_parts = [p for p in [primary_loc, ", ".join(all_locations), workplace_hint] if p]
         location_raw = " | ".join(dict.fromkeys(loc_parts))
 
-        passed, workplace_type, job_hash, _ = evaluate_posting(
-            company=company_name,
-            title=title,
-            location_raw=location_raw,
-        )
-        if not passed:
-            continue
-
         desc_plain = item.get("descriptionPlain") or strip_html(item.get("description") or "")
         lists_html = "\n".join(
             f"{lst.get('text', '')}\n{lst.get('content', '')}" for lst in (item.get("lists") or [])
@@ -143,6 +136,15 @@ def fetch_lever_board(slug: str, company_name: str, session: requests.Session) -
         full_description = "\n\n".join(
             part for part in [desc_plain, strip_html(lists_html), additional_plain] if part
         )
+
+        passed, workplace_type, job_hash, _ = evaluate_posting(
+            company=company_name,
+            title=title,
+            location_raw=location_raw,
+            description_text=full_description,
+        )
+        if not passed:
+            continue
 
         salary_range = item.get("salaryRange") or {}
         salary_min = salary_range.get("min")

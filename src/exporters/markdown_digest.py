@@ -68,6 +68,7 @@ def render_cli_table(
     table.add_column("Score", justify="right", style="bold green")
     table.add_column("Breakdown (KW / Sem)", justify="center", style="cyan")
     table.add_column("Badge", justify="center")
+    table.add_column("Exp. Tier", justify="center", style="magenta")
     table.add_column("Company", style="bold white", no_wrap=True)
     table.add_column("Title", style="white")
     table.add_column("Salary", justify="right", style="yellow")
@@ -81,12 +82,14 @@ def render_cli_table(
             else f"[yellow]{badge_raw}[/yellow]"
         )
         kw_dict = row.matched_keywords or {}
+        exp_tier = kw_dict.get("experience_tier") or "Unspecified"
         matched_groups = list((kw_dict.get("matched_groups") or {}).keys())
         table.add_row(
             str(idx),
             f"{(row.match_score or 0.0):.1f}",
             f"{(row.keyword_score or 0.0):.0f} / {(row.semantic_score or 0.0):.0f}",
             badge_styled,
+            exp_tier,
             row.company,
             row.title,
             format_salary_range(row.salary_min, row.salary_max),
@@ -125,16 +128,18 @@ def generate_markdown_digest(
         [
             "## Summary Leaderboard",
             "",
-            "| Rank | Match Score | Keyword | Semantic | Mode | Company | Role | Salary |",
-            "| ---: | ----------: | ------: | -------: | :--: | :------ | :--- | :----- |",
+            "| Rank | Match Score | Keyword | Semantic | Exp. Tier | Mode | Company | Role | Salary |",
+            "| ---: | ----------: | ------: | -------: | :-------- | :--: | :------ | :--- | :----- |",
         ]
     )
     for idx, row in enumerate(postings, start=1):
         badge = format_workplace_badge(row.workplace_type)
         salary_str = format_salary_range(row.salary_min, row.salary_max)
+        kw_dict = row.matched_keywords or {}
+        exp_tier = kw_dict.get("experience_tier") or "Unspecified"
         lines.append(
             f"| {idx} | **{(row.match_score or 0.0):.1f}** | {(row.keyword_score or 0.0):.1f} | "
-            f"{(row.semantic_score or 0.0):.1f} | `{badge}` | **{row.company}** | "
+            f"{(row.semantic_score or 0.0):.1f} | `{exp_tier}` | `{badge}` | **{row.company}** | "
             f"[{row.title}]({row.url}) | {salary_str} |"
         )
 
@@ -144,16 +149,19 @@ def generate_markdown_digest(
         badge = format_workplace_badge(row.workplace_type)
         salary_str = format_salary_range(row.salary_min, row.salary_max)
         kw_dict = row.matched_keywords or {}
+        exp_tier = kw_dict.get("experience_tier") or "Unspecified"
+        exp_penalty = float(kw_dict.get("experience_penalty") or 0.0)
         matched_groups = kw_dict.get("matched_groups") or {}
         missing_groups = kw_dict.get("missing_groups") or []
 
+        penalty_note = f", Stretch Adj: `-{exp_penalty:.0f}`" if exp_penalty > 0 else ""
         lines.extend(
             [
                 f"### {idx}. `{badge}` [{row.company} — {row.title}]({row.url})",
                 f"- **Composite Match Score:** **{(row.match_score or 0.0):.1f} / 100** "
                 f"*(Keyword Rubric: `{(row.keyword_score or 0.0):.1f}`, "
-                f"Resume Embedding Similarity: `{(row.semantic_score or 0.0):.1f}`)*",
-                f"- **Location:** {row.location_raw or row.workplace_type} | "
+                f"Resume Embedding Similarity: `{(row.semantic_score or 0.0):.1f}`{penalty_note})*",
+                f"- **Experience Required:** `{exp_tier}` | **Location:** {row.location_raw or row.workplace_type} | "
                 f"**Salary Range:** {salary_str} | **Source:** `{row.source}`",
             ]
         )

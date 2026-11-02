@@ -1,6 +1,12 @@
 # Deterministic Keyword Rubric Configuration (Stage 3.2 - 50% of Composite Score)
 # Each group within a tier can trigger at most once per posting, capped at tier max_points.
 
+experience_rules:
+  primary_max_years: 3        # 0-3 yrs required -> Primary Target (no penalty)
+  stretch_max_years: 5        # 4-5 yrs required -> Stretch Role (-3 pts on composite score)
+  hard_knockout_min_years: 6  # 6+ yrs minimum required -> Knocked out by filter
+  stretch_penalty_points: 3.0 # Slight penalty so 1-3 yr roles rank above 4-5 yr stretch roles
+
 tiers:
   tier_1:
     name: "Tier 1: Core Pillars"

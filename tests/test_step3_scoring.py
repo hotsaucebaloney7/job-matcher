@@ -18,7 +18,7 @@ from src.scoring.embed_scorer import (
     load_resume_text,
     score_unscored_postings,
 )
-from src.scoring.filters import compute_job_hash
+from src.scoring.filters import compute_job_hash, evaluate_posting, extract_min_years_experience
 from src.scoring.keyword_scorer import KeywordScorer
 
 
@@ -170,3 +170,54 @@ class TestHybridEmbeddingAndCompositeScoring:
             assert row.semantic_score == 100.0
             assert row.match_score == 92.5
             assert "Python Ecosystem" in (row.matched_keywords or {}).get("matched_groups", {})
+
+
+class TestExperienceExtractionAndTiers:
+    """Verify 1-3 yr Primary, 3-5 yr Stretch, and 6+ yr Knockout experience rules."""
+
+    @pytest.mark.parametrize(
+        "text,expected_years",
+        [
+            ("Requires 2+ years of experience in data science or machine learning.", 2),
+            ("1-3 years of professional experience building Python pipelines.", 1),
+            ("Minimum of 4 years of experience in applied AI.", 4),
+            ("5+ years of experience with a BS, or 3+ years of experience with an MS/PhD.", 3),
+            ("8+ years of experience in production ML systems.", 8),
+            ("For over 25 years, our company has built great products.", None),
+            ("Must be at least 18 years of age.", None),
+        ],
+    )
+    def test_extract_min_years_experience(self, text: str, expected_years: int | None) -> None:
+        assert extract_min_years_experience(text) == expected_years
+
+    def test_primary_vs_stretch_vs_knockout_tiers(self) -> None:
+        scorer = KeywordScorer()
+
+        # 2+ years -> Primary (1-3 yrs), 0 penalty
+        _, primary_info = scorer.score("2+ years of experience with Python and SQL.", title="Data Scientist")
+        assert primary_info["min_years_required"] == 2
+        assert primary_info["experience_tier"] == "2+ yrs (Primary 1-3)"
+        assert primary_info["experience_penalty"] == 0.0
+        assert primary_info["experience_knockout"] is False
+
+        # 5+ years -> Stretch (3-5 yrs), 3.0 pt penalty
+        _, stretch_info = scorer.score("5+ years of experience with Python and SQL.", title="Senior Data Scientist")
+        assert stretch_info["min_years_required"] == 5
+        assert stretch_info["experience_tier"] == "5+ yrs (Stretch 3-5)"
+        assert stretch_info["experience_penalty"] == 3.0
+        assert stretch_info["experience_knockout"] is False
+
+        # 7+ years -> Hard knockout (>5 yrs)
+        _, ko_info = scorer.score("7+ years of experience in machine learning.", title="Machine Learning Engineer")
+        assert ko_info["min_years_required"] == 7
+        assert ko_info["experience_knockout"] is True
+
+        passed, _, _, reason = evaluate_posting(
+            company="Acme",
+            title="Machine Learning Engineer",
+            location_raw="Remote - US",
+            description_text="Requires 7+ years of experience in machine learning.",
+        )
+        assert not passed
+        assert "7+ years" in reason
+

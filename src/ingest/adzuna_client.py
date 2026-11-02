@@ -89,11 +89,13 @@ def _execute_adzuna_query(
         location_raw = " | ".join(
             part for part in [display_loc, area_str, default_location_hint] if part
         )
+        description_text = strip_html(item.get("description") or "")
 
         passed, workplace_type, job_hash, _ = evaluate_posting(
             company=company,
             title=title,
             location_raw=location_raw,
+            description_text=description_text,
         )
         if not passed:
             continue
@@ -113,7 +115,7 @@ def _execute_adzuna_query(
                 "salary_min": int(salary_min) if isinstance(salary_min, (int, float)) else None,
                 "salary_max": int(salary_max) if isinstance(salary_max, (int, float)) else None,
                 "url": item.get("redirect_url") or "",
-                "description_text": strip_html(item.get("description") or ""),
+                "description_text": description_text,
                 "date_posted": _parse_adzuna_date(item.get("created")),
             }
         )

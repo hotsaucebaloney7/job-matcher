@@ -51,6 +51,81 @@ US_INDICATOR_PATTERN = re.compile(
 )
 
 HYBRID_PATTERN = re.compile(r"\bhybrid\b", re.IGNORECASE)
+SENIOR_TITLE_PATTERN = re.compile(r"\b(?:senior|sr\.?)\b", re.IGNORECASE)
+
+# Experience extraction regexes:
+# Matches phrases like "3+ years of experience", "3-5 years of experience",
+# "minimum of 4 years", "at least 2 years of professional experience",
+# "5+ years in machine learning / data science / software engineering"
+EXPERIENCE_PATTERNS = [
+    re.compile(
+        r"\b(?:at\s+least|minimum\s+of|min\.?\s+of)?\s*(\d{1,2})\s*(?:\+|plus|\s*(?:\-|to|–)\s*\d{1,2})?\s*"
+        r"(?:years?|yrs?)\b[^.\n]{0,65}?\b(?:experience|exp\b|background|track\s+record|"
+        r"in\s+(?:data|machine\s+learning|ml|ai|software|engineering|analytics|applied|python|related))",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:experience|background)\s*(?:of|:|-)?\s*(\d{1,2})\s*(?:\+|plus|\s*(?:\-|to|–)\s*\d{1,2})?\s*(?:years?|yrs?)\b",
+        re.IGNORECASE,
+    ),
+]
+
+# Phrases to ignore when extracting candidate years of experience (e.g., company age or legal age)
+EXPERIENCE_IGNORE_CONTEXT = re.compile(
+    r"\b(?:years\s+of\s+age|years\s+old|combined\s+experience|for\s+over\s+\d+\s+years|"
+    r"founded\s+\d+\s+years|celebrating\s+\d+\s+years)\b",
+    re.IGNORECASE,
+)
+
+DEFAULT_MAX_EXPERIENCE_YEARS = 5
+
+
+def extract_min_years_experience(description_text: Optional[str]) -> Optional[int]:
+    """Extract the minimum required years of experience from a job description.
+
+    When a posting lists alternative degree tiers (e.g. '5+ years with BS or 3+ years with MS'),
+    or multiple skill durations, returns the minimum general requirement in [1, 15].
+    Returns None if no explicit years-of-experience requirement is found.
+    """
+    if not description_text:
+        return None
+
+    found_years: list[int] = []
+    for line in description_text.splitlines():
+        if EXPERIENCE_IGNORE_CONTEXT.search(line):
+            continue
+        for pattern in EXPERIENCE_PATTERNS:
+            for match in pattern.finditer(line):
+                try:
+                    yrs = int(match.group(1))
+                except (ValueError, IndexError):
+                    continue
+                # Reasonable candidate experience requirement bounds (1 to 15 years)
+                if 1 <= yrs <= 15:
+                    found_years.append(yrs)
+
+    if not found_years:
+        return None
+    return min(found_years)
+
+
+def classify_experience_tier(
+    min_years: Optional[int],
+    title: str = "",
+    primary_max: int = 3,
+    stretch_max: int = 5,
+) -> str:
+    """Classify a posting's experience requirement into Primary (1-3 yrs), Stretch (3-5 yrs), or Knockout."""
+    if min_years is not None:
+        if min_years <= primary_max:
+            return f"{min_years}+ yrs (Primary 1-3)"
+        if min_years <= stretch_max:
+            return f"{min_years}+ yrs (Stretch 3-5)"
+        return f"{min_years}+ yrs (Exceeds 5)"
+
+    if SENIOR_TITLE_PATTERN.search(title or ""):
+        return "Unspecified (Sr. Stretch)"
+    return "Unspecified (Target)"
 
 
 def lowercase_alphanumeric(value: str) -> str:
@@ -138,8 +213,10 @@ def evaluate_posting(
     company: str,
     title: str,
     location_raw: Optional[str],
+    description_text: Optional[str] = None,
+    max_experience_years: int = DEFAULT_MAX_EXPERIENCE_YEARS,
 ) -> Tuple[bool, Optional[WorkplaceType], Optional[str], str]:
-    """Run all Step 3.1 Hard Knockout Filters on a job posting.
+    """Run all Step 3.1 Hard Knockout Filters (including max years of experience) on a job posting.
 
     Returns:
         Tuple of (passed, workplace_type, job_hash, reason)
@@ -153,6 +230,11 @@ def evaluate_posting(
     workplace_type = classify_location(location_raw)
     if workplace_type is None:
         return False, None, None, f"Location rejected ({location_raw!r})"
+
+    if description_text:
+        min_years = extract_min_years_experience(description_text)
+        if min_years is not None and min_years > max_experience_years:
+            return False, None, None, f"Requires {min_years}+ years experience (max {max_experience_years})"
 
     job_hash = compute_job_hash(company, title, workplace_type)
     return True, workplace_type, job_hash, "Passed"

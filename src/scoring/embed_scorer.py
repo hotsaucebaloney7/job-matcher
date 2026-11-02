@@ -123,9 +123,13 @@ def load_resume_text(
     return text, resolved_path
 
 
-def compute_composite_score(keyword_score: float, semantic_score: float) -> float:
-    """Compute Stage 3.4 weighted composite match score (50% keyword + 50% semantic)."""
-    composite = 0.50 * float(keyword_score) + 0.50 * float(semantic_score)
+def compute_composite_score(
+    keyword_score: float,
+    semantic_score: float,
+    experience_penalty: float = 0.0,
+) -> float:
+    """Compute Stage 3.4 weighted composite match score (50% keyword + 50% semantic - stretch penalty)."""
+    composite = 0.50 * float(keyword_score) + 0.50 * float(semantic_score) - float(experience_penalty)
     return round(min(max(composite, 0.0), 100.0), 2)
 
 
@@ -227,11 +231,19 @@ def score_unscored_postings(
     semantic_scores = emb_scorer.score_batch(descriptions)
 
     for row, sem_score in zip(unscored, semantic_scores):
-        kw_score, breakdown = kw_scorer.score(row.description_text or "")
+        kw_score, breakdown = kw_scorer.score(row.description_text or "", title=row.title or "")
         row.keyword_score = kw_score
         row.semantic_score = sem_score
-        row.match_score = compute_composite_score(kw_score, sem_score)
         row.matched_keywords = breakdown
+
+        if breakdown.get("experience_knockout"):
+            row.match_score = 0.0
+            row.status = "rejected"
+        else:
+            penalty = float(breakdown.get("experience_penalty") or 0.0)
+            row.match_score = compute_composite_score(kw_score, sem_score, experience_penalty=penalty)
+            if row.status == "rejected":
+                row.status = "new"
 
     session.commit()
     return len(unscored)
