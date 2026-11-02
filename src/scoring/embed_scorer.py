@@ -127,9 +127,21 @@ def compute_composite_score(
     keyword_score: float,
     semantic_score: float,
     experience_penalty: float = 0.0,
+    is_snippet: bool = False,
 ) -> float:
-    """Compute Stage 3.4 weighted composite match score (50% keyword + 50% semantic - stretch penalty)."""
-    composite = 0.50 * float(keyword_score) + 0.50 * float(semantic_score) - float(experience_penalty)
+    """Compute Stage 3.4 weighted composite match score (50% keyword + 50% semantic - stretch penalty).
+
+    For truncated aggregator snippets (<= 600 chars, e.g., Adzuna 500-char summaries),
+    applies snippet-length normalization so local aggregator matches compete fairly
+    against full-length ATS descriptions.
+    """
+    kw = float(keyword_score)
+    sem = float(semantic_score)
+    if is_snippet:
+        boosted_kw = min(100.0, kw * 1.45)
+        composite = 0.40 * boosted_kw + 0.60 * sem - float(experience_penalty)
+    else:
+        composite = 0.50 * kw + 0.50 * sem - float(experience_penalty)
     return round(min(max(composite, 0.0), 100.0), 2)
 
 
@@ -227,11 +239,15 @@ def score_unscored_postings(
     kw_scorer = keyword_scorer or KeywordScorer()
     emb_scorer = embed_scorer or EmbeddingScorer()
 
-    descriptions = [row.description_text or "" for row in unscored]
+    descriptions = [
+        f"{row.title or ''}\n{row.description_text or ''}".strip() for row in unscored
+    ]
     semantic_scores = emb_scorer.score_batch(descriptions)
 
     for row, sem_score in zip(unscored, semantic_scores):
-        kw_score, breakdown = kw_scorer.score(row.description_text or "", title=row.title or "")
+        desc_body = row.description_text or ""
+        combined_text = f"{row.title or ''}\n{desc_body}".strip()
+        kw_score, breakdown = kw_scorer.score(combined_text, title=row.title or "")
         row.keyword_score = kw_score
         row.semantic_score = sem_score
         row.matched_keywords = breakdown
@@ -241,7 +257,13 @@ def score_unscored_postings(
             row.status = "rejected"
         else:
             penalty = float(breakdown.get("experience_penalty") or 0.0)
-            row.match_score = compute_composite_score(kw_score, sem_score, experience_penalty=penalty)
+            is_snippet = row.source == "adzuna" and 0 < len(desc_body) <= 600
+            row.match_score = compute_composite_score(
+                kw_score,
+                sem_score,
+                experience_penalty=penalty,
+                is_snippet=is_snippet,
+            )
             if row.status == "rejected":
                 row.status = "new"
 
