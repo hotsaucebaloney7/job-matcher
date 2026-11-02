@@ -141,4 +141,4 @@ job-matcher/
 - [x] **Step 1:** Create `requirements.txt`, `config/companies.yaml`, `src/scoring/filters.py`, and `src/ingest/ats_poller.py`; verify live terminal job fetching.
 - [x] **Step 2:** Create `.env`, `src/db/models.py`, and `src/db/session.py`; verify MySQL 8.0 table creation and `job_hash` deduplication upsert.
 - [x] **Step 3:** Create `config/keywords.yaml`, `data/resume.txt` (placeholder until updated), `src/scoring/keyword_scorer.py`, and `src/scoring/embed_scorer.py`.
-- [ ] **Step 4:** Create `src/exporters/markdown_digest.py` and `src/main.py` to run the complete pipeline end-to-end.
+- [x] **Step 4:** Create `src/exporters/markdown_digest.py` and `src/main.py` to run the complete pipeline end-to-end.

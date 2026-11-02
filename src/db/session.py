@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import os
+import socket
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
+from urllib.parse import urlparse
 
 from dotenv import load_dotenv
 from rich.console import Console
@@ -42,8 +45,34 @@ def get_session_factory(engine: Optional[Engine] = None) -> sessionmaker[Session
     return sessionmaker(bind=target_engine, autoflush=False, autocommit=False, expire_on_commit=False)
 
 
+def _ensure_mysql_container_running(database_url: str) -> None:
+    """If targeting local MySQL on port 3306 and the port is closed, auto-start the Docker Compose container."""
+    parsed = urlparse(database_url)
+    if not (parsed.scheme or "").startswith("mysql"):
+        return
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 3306
+    if host not in ("localhost", "127.0.0.1"):
+        return
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(1.0)
+        if sock.connect_ex((host, port)) == 0:
+            return
+
+    project_root = Path(__file__).resolve().parents[2]
+    compose_file = project_root / "docker-compose.yml"
+    if not compose_file.exists():
+        return
+
+    subprocess.run(["docker", "desktop", "start"], cwd=str(project_root), check=False)
+    subprocess.run(["docker", "compose", "up", "-d", "--wait"], cwd=str(project_root), check=False)
+
+
 def init_db(engine: Optional[Engine] = None) -> Engine:
     """Create the job_postings table and indexes if they do not exist."""
+    if engine is None:
+        _ensure_mysql_container_running(get_database_url())
     target_engine = engine or get_engine()
     Base.metadata.create_all(bind=target_engine)
     return target_engine
