@@ -242,27 +242,33 @@ def poll_jsearch_rapidapi(
             console.print("[dim]JSearch (Google for Jobs): Skipped (JSEARCH_RAPIDAPI_KEY not set in .env)[/dim]")
         return [], []
 
-    url = "https://jsearch.p.rapidapi.com/search"
+    url = "https://jsearch.p.rapidapi.com/search-v2"
     headers = {
         "X-RapidAPI-Key": resolved_key,
         "X-RapidAPI-Host": "jsearch.p.rapidapi.com",
     }
     queries = [
         {
-            "label": "Raleigh / RTP Local",
+            "label": "Raleigh / RTP Local (Data Scientist)",
             "params": {
-                "query": "Data Scientist OR AI Engineer OR Machine Learning Engineer in Raleigh, NC",
-                "page": "1",
+                "query": "Data Scientist in Raleigh, NC",
                 "num_pages": "1",
-                "date_posted": "week",
+                "date_posted": "month",
             },
         },
         {
-            "label": "US Remote",
+            "label": "Raleigh / RTP Local (AI / ML Engineer)",
             "params": {
-                "query": "Data Scientist OR AI Engineer OR Machine Learning Engineer in USA",
-                "remote_jobs_only": "true",
-                "page": "1",
+                "query": "AI Engineer Machine Learning Engineer in Raleigh, NC",
+                "num_pages": "1",
+                "date_posted": "month",
+            },
+        },
+        {
+            "label": "US Remote (Data Scientist / AI Engineer)",
+            "params": {
+                "query": "Remote Data Scientist AI Engineer in USA",
+                "work_from_home": "true",
                 "num_pages": "1",
                 "date_posted": "week",
             },
@@ -278,23 +284,30 @@ def poll_jsearch_rapidapi(
     try:
         for q in queries:
             try:
-                resp = http.get(url, headers=headers, params=q["params"], timeout=REQUEST_TIMEOUT_SECONDS)
+                resp = http.get(url, headers=headers, params=q["params"], timeout=30)
                 resp.raise_for_status()
-                raw_jobs = (resp.json() or {}).get("data", []) or []
+                data_obj = (resp.json() or {}).get("data")
+                if isinstance(data_obj, dict):
+                    raw_jobs = data_obj.get("jobs", []) or []
+                elif isinstance(data_obj, list):
+                    raw_jobs = data_obj
+                else:
+                    raw_jobs = []
 
                 matched_count = 0
                 for item in raw_jobs:
                     title = (item.get("job_title") or "").strip()
                     company = (item.get("employer_name") or "Unknown Company").strip()
+                    job_loc = (item.get("job_location") or "").strip()
                     city = (item.get("job_city") or "").strip()
                     state = (item.get("job_state") or "").strip()
                     country = (item.get("job_country") or "").strip()
                     is_remote = item.get("job_is_remote") is True
 
-                    loc_parts = [p for p in [city, state, country] if p]
+                    loc_parts = [p for p in [job_loc, city, state, country] if p]
                     if is_remote:
                         loc_parts.insert(0, "Remote")
-                    location_raw = ", ".join(loc_parts)
+                    location_raw = ", ".join(dict.fromkeys(loc_parts))
                     description_text = strip_html(item.get("job_description") or "")
 
                     # Check structured JSearch experience months if present
@@ -319,19 +332,20 @@ def poll_jsearch_rapidapi(
                     if period not in ("YEAR", "YEARLY", ""):
                         sal_min, sal_max = None, None
 
+                    raw_id = str(item.get("job_id") or "")
                     deduped.setdefault(
                         job_hash,
                         {
                             "job_hash": job_hash,
                             "source": "jsearch",
-                            "external_id": str(item.get("job_id")) if item.get("job_id") else None,
+                            "external_id": raw_id[:128] if raw_id else None,
                             "company": company,
                             "title": title,
-                            "location_raw": location_raw,
+                            "location_raw": job_loc or location_raw,
                             "workplace_type": workplace_type,
                             "salary_min": int(sal_min) if isinstance(sal_min, (int, float)) else None,
                             "salary_max": int(sal_max) if isinstance(sal_max, (int, float)) else None,
-                            "url": item.get("job_apply_link") or item.get("job_google_link") or "",
+                            "url": (item.get("job_apply_link") or item.get("job_google_link") or "")[:768],
                             "description_text": description_text,
                             "date_posted": _parse_iso_dt(item.get("job_posted_at_datetime_utc")),
                         },
