@@ -58,19 +58,39 @@ def _ensure_database_schema(
     client: requests.Session,
     headers: Dict[str, str],
     database_id: str,
-) -> str:
-    """Ensure the Notion database has all Job Matcher columns and return the title property name."""
+) -> tuple[str, str]:
+    """Resolve child_database if a parent Page ID was provided, ensure schema columns, and return (db_id, title_prop)."""
+    resolved_db_id = database_id
     title_prop_name = "Name"
     try:
-        resp = client.get(f"{NOTION_DATABASE_URL}/{database_id}", headers=headers, timeout=15)
-        if not hasattr(resp, "status_code") or resp.status_code != 200:
-            return "Title"
+        resp = client.get(f"{NOTION_DATABASE_URL}/{resolved_db_id}", headers=headers, timeout=15)
+        if not hasattr(resp, "status_code"):
+            return resolved_db_id, "Title"
+
+        # If the user pasted a parent Page URL containing an inline database, find the child_database block
+        if resp.status_code == 400 and "is a page, not a database" in getattr(resp, "text", ""):
+            blocks_resp = client.get(
+                f"https://api.notion.com/v1/blocks/{resolved_db_id}/children",
+                headers=headers,
+                timeout=15,
+            )
+            if hasattr(blocks_resp, "status_code") and blocks_resp.status_code == 200:
+                blocks = (blocks_resp.json() or {}).get("results", []) or []
+                for blk in blocks:
+                    if isinstance(blk, dict) and blk.get("type") == "child_database" and not blk.get("archived"):
+                        resolved_db_id = blk["id"].replace("-", "")
+                        break
+            resp = client.get(f"{NOTION_DATABASE_URL}/{resolved_db_id}", headers=headers, timeout=15)
+
+        if resp.status_code != 200:
+            return resolved_db_id, "Title"
+
         db_data = resp.json() if callable(getattr(resp, "json", None)) else {}
         if not isinstance(db_data, dict):
-            return "Title"
+            return resolved_db_id, "Title"
         props = db_data.get("properties")
         if not isinstance(props, dict):
-            return "Title"
+            return resolved_db_id, "Title"
 
         for prop_name, prop_meta in props.items():
             if isinstance(prop_meta, dict) and prop_meta.get("type") == "title":
@@ -111,7 +131,7 @@ def _ensure_database_schema(
         missing_props = {k: v for k, v in desired_props.items() if k not in props}
         if missing_props and hasattr(client, "patch"):
             patch_resp = client.patch(
-                f"{NOTION_DATABASE_URL}/{database_id}",
+                f"{NOTION_DATABASE_URL}/{resolved_db_id}",
                 headers=headers,
                 json={"properties": missing_props},
                 timeout=15,
@@ -119,9 +139,9 @@ def _ensure_database_schema(
             if hasattr(patch_resp, "raise_for_status"):
                 patch_resp.raise_for_status()
     except Exception:
-        return title_prop_name
+        return resolved_db_id, title_prop_name
 
-    return title_prop_name
+    return resolved_db_id, title_prop_name
 
 
 def sync_to_notion(
@@ -165,7 +185,7 @@ def sync_to_notion(
     synced_count = 0
 
     try:
-        title_prop = _ensure_database_schema(client, headers, resolved_db)
+        resolved_db, title_prop = _ensure_database_schema(client, headers, resolved_db)
 
         for row in unsynced:
             mk = row.matched_keywords if isinstance(row.matched_keywords, dict) else {}
