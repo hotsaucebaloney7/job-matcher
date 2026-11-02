@@ -81,17 +81,19 @@ def init_db(engine: Optional[Engine] = None) -> Engine:
 def _normalize_row_payload(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Prepare a dictionary matching JobPosting columns for bulk/single upsert."""
     now = datetime.utcnow()
+    ext_id = raw.get("external_id")
+    loc_raw = raw.get("location_raw")
     return {
-        "job_hash": raw["job_hash"],
-        "source": raw["source"],
-        "external_id": raw.get("external_id"),
-        "company": raw["company"],
-        "title": raw["title"],
-        "location_raw": raw.get("location_raw"),
-        "workplace_type": raw["workplace_type"],
+        "job_hash": str(raw["job_hash"])[:64],
+        "source": str(raw["source"])[:32],
+        "external_id": str(ext_id)[:128] if ext_id is not None else None,
+        "company": str(raw["company"])[:255],
+        "title": str(raw["title"])[:255],
+        "location_raw": str(loc_raw)[:255] if loc_raw is not None else None,
+        "workplace_type": str(raw["workplace_type"])[:32],
         "salary_min": raw.get("salary_min"),
         "salary_max": raw.get("salary_max"),
-        "url": raw["url"],
+        "url": str(raw["url"])[:1024],
         "description_text": raw.get("description_text") or "",
         "date_posted": raw.get("date_posted"),
         "date_fetched": raw.get("date_fetched") or now,

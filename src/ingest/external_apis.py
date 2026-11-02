@@ -130,11 +130,12 @@ def poll_the_muse(
     url = "https://www.themuse.com/api/public/jobs"
 
     queries = [
-        {"label": "Raleigh / Durham, NC", "location": ["Raleigh, NC", "Durham, NC"]},
+        {"label": "Raleigh / Durham / Cary, NC", "location": ["Raleigh, NC", "Durham, NC", "Cary, NC"]},
         {"label": "Flexible / Remote", "location": ["Flexible / Remote"]},
     ]
     categories = ["Data and Analytics", "Data Science"]
-    levels = ["Entry Level", "Mid Level"]
+    levels = ["Entry Level", "Mid Level", "Senior Level"]
+    max_pages = 5 if resolved_key else 1
 
     deduped: Dict[str, Dict[str, Any]] = {}
     stats: List[Dict[str, Any]] = []
@@ -145,66 +146,74 @@ def poll_the_muse(
 
     try:
         for q in queries:
-            params: Dict[str, Any] = {
-                "page": 1,
-                "category": categories,
-                "level": levels,
-                "location": q["location"],
-            }
-            if resolved_key:
-                params["api_key"] = resolved_key
-
+            raw_total = 0
+            matched_count = 0
             try:
-                resp = http.get(url, params=params, timeout=REQUEST_TIMEOUT_SECONDS)
-                resp.raise_for_status()
-                raw_jobs = (resp.json() or {}).get("results", []) or []
+                for page in range(1, max_pages + 1):
+                    params: Dict[str, Any] = {
+                        "page": page,
+                        "category": categories,
+                        "level": levels,
+                        "location": q["location"],
+                    }
+                    if resolved_key:
+                        params["api_key"] = resolved_key
 
-                matched_count = 0
-                for item in raw_jobs:
-                    title = (item.get("name") or "").strip()
-                    company = ((item.get("company") or {}).get("name") or "Unknown Company").strip()
-                    locs = [
-                        (loc.get("name") or "").strip()
-                        for loc in (item.get("locations") or [])
-                        if isinstance(loc, dict) and loc.get("name")
-                    ]
-                    location_raw = " | ".join(locs)
-                    description_text = strip_html(item.get("contents") or "")
+                    resp = http.get(url, params=params, timeout=REQUEST_TIMEOUT_SECONDS)
+                    resp.raise_for_status()
+                    payload = resp.json() or {}
+                    raw_jobs = payload.get("results", []) or []
+                    if not raw_jobs:
+                        break
+                    raw_total += len(raw_jobs)
 
-                    passed, workplace_type, job_hash, _ = evaluate_posting(
-                        company=company,
-                        title=title,
-                        location_raw=location_raw,
-                        description_text=description_text,
-                    )
-                    if not passed:
-                        continue
+                    for item in raw_jobs:
+                        title = (item.get("name") or "").strip()
+                        company = ((item.get("company") or {}).get("name") or "Unknown Company").strip()
+                        locs = [
+                            (loc.get("name") or "").strip()
+                            for loc in (item.get("locations") or [])
+                            if isinstance(loc, dict) and loc.get("name")
+                        ]
+                        location_raw = " | ".join(locs)
+                        description_text = strip_html(item.get("contents") or "")
 
-                    refs = item.get("refs") or {}
-                    deduped.setdefault(
-                        job_hash,
-                        {
-                            "job_hash": job_hash,
-                            "source": "themuse",
-                            "external_id": str(item.get("id")) if item.get("id") is not None else None,
-                            "company": company,
-                            "title": title,
-                            "location_raw": location_raw,
-                            "workplace_type": workplace_type,
-                            "salary_min": None,
-                            "salary_max": None,
-                            "url": refs.get("landing_page") or "",
-                            "description_text": description_text,
-                            "date_posted": _parse_iso_dt(item.get("publication_date")),
-                        },
-                    )
-                    matched_count += 1
+                        passed, workplace_type, job_hash, _ = evaluate_posting(
+                            company=company,
+                            title=title,
+                            location_raw=location_raw,
+                            description_text=description_text,
+                        )
+                        if not passed:
+                            continue
+
+                        refs = item.get("refs") or {}
+                        if job_hash not in deduped:
+                            deduped[job_hash] = {
+                                "job_hash": job_hash,
+                                "source": "themuse",
+                                "external_id": str(item.get("id")) if item.get("id") is not None else None,
+                                "company": company,
+                                "title": title,
+                                "location_raw": location_raw,
+                                "workplace_type": workplace_type,
+                                "salary_min": None,
+                                "salary_max": None,
+                                "url": refs.get("landing_page") or "",
+                                "description_text": description_text,
+                                "date_posted": _parse_iso_dt(item.get("publication_date")),
+                            }
+                            matched_count += 1
+
+                    page_count = payload.get("page_count")
+                    if isinstance(page_count, int) and page >= page_count:
+                        break
 
                 stats.append(
                     {
                         "ats": "The Muse",
                         "company": q["label"],
-                        "raw": len(raw_jobs),
+                        "raw": raw_total,
                         "matched": matched_count,
                         "status": "OK",
                     }
