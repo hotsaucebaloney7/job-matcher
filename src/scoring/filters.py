@@ -80,8 +80,10 @@ def strip_html(raw_html: Optional[str]) -> str:
     soup = BeautifulSoup(unescaped, "html.parser")
     for tag in soup(["script", "style"]):
         tag.decompose()
-    text = soup.get_text(separator="\n")
-    # Collapse excessive blank lines and trailing spaces
+    for block_tag in soup.find_all(["p", "div", "li", "br", "h1", "h2", "h3", "h4", "h5", "h6", "tr"]):
+        block_tag.append("\n")
+    text = soup.get_text(separator=" ")
+    # Collapse excessive spaces and blank lines
     lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines()]
     cleaned = "\n".join(line for line in lines if line)
     return cleaned
