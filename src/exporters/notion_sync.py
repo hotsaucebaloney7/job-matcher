@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import requests
 from dotenv import load_dotenv
@@ -170,6 +170,7 @@ def sync_to_notion(
     stmt = (
         select(JobPosting)
         .where(
+            JobPosting.status == "new",
             JobPosting.match_score.is_not(None),
             JobPosting.match_score >= min_score,
             JobPosting.notion_page_id.is_(None),
@@ -240,3 +241,96 @@ def sync_to_notion(
             client.close()
 
     return synced_count
+
+
+PRESERVED_NOTION_STATUSES = {
+    "Applied",
+    "Follow Up Needed",
+    "Interviewing",
+    "Offer",
+    "Declined / Rejected",
+}
+
+
+def archive_expired_notion_pages(
+    session: Session,
+    expired_rows: Optional[Sequence[JobPosting]] = None,
+    api_key: Optional[str] = None,
+    console: Optional[Console] = None,
+    http_session: Optional[requests.Session] = None,
+) -> int:
+    """Archive Notion cards for expired postings unless the user already applied to them."""
+    resolved_key = (api_key if api_key is not None else os.getenv("NOTION_API_KEY", "")).strip()
+    if not resolved_key:
+        return 0
+
+    if expired_rows is not None:
+        candidates = [r for r in expired_rows if r.notion_page_id]
+    else:
+        stmt = select(JobPosting).where(
+            JobPosting.status == "rejected",
+            JobPosting.notion_page_id.is_not(None),
+        )
+        candidates = list(session.scalars(stmt).all())
+
+    if not candidates:
+        return 0
+
+    headers = {
+        "Authorization": f"Bearer {resolved_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": NOTION_VERSION,
+    }
+
+    own_http = http_session is None
+    client = http_session or requests.Session()
+    archived_count = 0
+
+    try:
+        for row in candidates:
+            mk = dict(row.matched_keywords) if isinstance(row.matched_keywords, dict) else {}
+            if not mk.get("expired_online") or mk.get("notion_archived") or mk.get("notion_preserved"):
+                continue
+
+            page_id = row.notion_page_id
+            get_resp = client.get(f"{NOTION_API_URL}/{page_id}", headers=headers, timeout=15)
+            if hasattr(get_resp, "status_code") and get_resp.status_code == 200:
+                page_data = get_resp.json() or {}
+                if page_data.get("archived"):
+                    mk["notion_archived"] = True
+                    row.matched_keywords = mk
+                    continue
+
+                props = page_data.get("properties") or {}
+                status_prop = props.get("Status") or {}
+                select_val = status_prop.get("select") or status_prop.get("status") or {}
+                current_status = (select_val.get("name") or "").strip()
+
+                if current_status in PRESERVED_NOTION_STATUSES:
+                    # User already applied or tracked an outcome — preserve on Notion board
+                    row.status = "applied"
+                    mk["notion_preserved"] = True
+                    row.matched_keywords = mk
+                    continue
+
+            patch_resp = client.patch(
+                f"{NOTION_API_URL}/{page_id}",
+                headers=headers,
+                json={"archived": True},
+                timeout=15,
+            )
+            if hasattr(patch_resp, "raise_for_status"):
+                patch_resp.raise_for_status()
+            mk["notion_archived"] = True
+            row.matched_keywords = mk
+            archived_count += 1
+
+        session.commit()
+    except Exception as exc:
+        if console:
+            console.print(f"[yellow]Warning:[/yellow] Notion expired-page cleanup encountered an error: {exc}")
+    finally:
+        if own_http:
+            client.close()
+
+    return archived_count

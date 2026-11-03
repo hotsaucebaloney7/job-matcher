@@ -5,9 +5,9 @@ from __future__ import annotations
 import os
 import socket
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Set
 from urllib.parse import urlparse
 
 from dotenv import load_dotenv
@@ -164,6 +164,59 @@ def upsert_job_postings(session: Session, postings: Sequence[Dict[str, Any]]) ->
     session.commit()
     session.expire_all()
     return len(rows)
+
+
+FULL_BOARD_SOURCES = ("greenhouse", "lever", "ashby", "remotive")
+
+
+def expire_stale_postings(
+    session: Session,
+    active_hashes: Set[str],
+    healthy_sources: Optional[Set[str]] = None,
+    failed_companies: Optional[Set[str]] = None,
+    aggregator_grace_days: int = 3,
+    now_utc: Optional[datetime] = None,
+) -> List[JobPosting]:
+    """Mark unapplied ('new') postings that are no longer online as expired ('rejected').
+
+    - For full-board sources (Greenhouse, Lever, Ashby, Remotive), if the source polled
+      healthy in this run and a 'new' posting was not in `active_hashes`, it was taken down.
+    - For paginated search APIs (Adzuna, JSearch, The Muse, USAJOBS), if a 'new' posting
+      has not been seen for `aggregator_grace_days`+ days, it is marked expired.
+    """
+    reference_now = now_utc or datetime.utcnow()
+    cutoff = reference_now - timedelta(days=aggregator_grace_days)
+    failed_co_lower = {c.lower() for c in (failed_companies or set())}
+
+    stmt = select(JobPosting).where(JobPosting.status == "new")
+    candidates = list(session.scalars(stmt).all())
+    expired_rows: List[JobPosting] = []
+
+    for row in candidates:
+        if row.job_hash in active_hashes:
+            continue
+        if (row.company or "").lower() in failed_co_lower:
+            continue
+
+        src = (row.source or "").lower()
+        is_full_board = src in FULL_BOARD_SOURCES and (
+            healthy_sources is None or src in healthy_sources
+        )
+        is_stale_aggregator = (
+            row.date_last_seen is not None and row.date_last_seen < cutoff
+        )
+
+        if is_full_board or is_stale_aggregator:
+            row.status = "rejected"
+            mk = dict(row.matched_keywords) if isinstance(row.matched_keywords, dict) else {}
+            mk["expired_online"] = True
+            row.matched_keywords = mk
+            expired_rows.append(row)
+
+    if expired_rows:
+        session.commit()
+
+    return expired_rows
 
 
 def get_unscored_postings(session: Session) -> List[JobPosting]:

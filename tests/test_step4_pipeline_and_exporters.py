@@ -7,13 +7,13 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from src.db.models import JobPosting
-from src.db.session import get_engine, get_session_factory, init_db, upsert_job_postings
+from src.db.session import expire_stale_postings, get_engine, get_session_factory, init_db, upsert_job_postings
 from src.exporters.markdown_digest import (
     format_salary_range,
     generate_markdown_digest,
     get_high_scoring_new_postings,
 )
-from src.exporters.notion_sync import sync_to_notion
+from src.exporters.notion_sync import archive_expired_notion_pages, sync_to_notion
 from src.ingest.adzuna_client import poll_adzuna
 from src.ingest.ats_poller import fetch_ashby_board
 from src.ingest.external_apis import poll_jsearch_rapidapi, poll_remotive, poll_the_muse, poll_usajobs
@@ -376,4 +376,105 @@ class TestAshbyAndExternalAggregatorClients:
         assert usa_jobs[0]["workplace_type"] == "Local"
         assert usa_jobs[0]["salary_min"] == 95000
         assert usa_jobs[0]["salary_max"] == 128000
+
+    def test_expire_stale_postings_and_archive_unapplied_notion_pages(self) -> None:
+        engine = get_engine("sqlite+pysqlite:///:memory:")
+        init_db(engine)
+        SessionLocal = get_session_factory(engine)
+
+        hash_unapplied = compute_job_hash("OldCorp", "Data Scientist", "Remote")
+        hash_applied = compute_job_hash("AppliedCorp", "AI Engineer", "Local")
+        hash_active = compute_job_hash("LiveCorp", "ML Engineer", "Remote")
+
+        with SessionLocal() as session:
+            upsert_job_postings(
+                session,
+                [
+                    {
+                        "job_hash": hash_unapplied,
+                        "source": "greenhouse",
+                        "external_id": "1",
+                        "company": "OldCorp",
+                        "title": "Data Scientist",
+                        "location_raw": "Remote - US",
+                        "workplace_type": "Remote",
+                        "url": "https://boards.greenhouse.io/oldcorp/jobs/1",
+                        "description_text": "Python and SQL.",
+                    },
+                    {
+                        "job_hash": hash_applied,
+                        "source": "greenhouse",
+                        "external_id": "2",
+                        "company": "AppliedCorp",
+                        "title": "AI Engineer",
+                        "location_raw": "Raleigh, NC",
+                        "workplace_type": "Local",
+                        "url": "https://boards.greenhouse.io/appliedcorp/jobs/2",
+                        "description_text": "PyTorch and RAG.",
+                    },
+                    {
+                        "job_hash": hash_active,
+                        "source": "greenhouse",
+                        "external_id": "3",
+                        "company": "LiveCorp",
+                        "title": "ML Engineer",
+                        "location_raw": "Remote - US",
+                        "workplace_type": "Remote",
+                        "url": "https://boards.greenhouse.io/livecorp/jobs/3",
+                        "description_text": "Python and AWS.",
+                    },
+                ],
+            )
+
+            row_unapplied = session.get(JobPosting, hash_unapplied)
+            row_applied = session.get(JobPosting, hash_applied)
+            assert row_unapplied is not None and row_applied is not None
+            row_unapplied.notion_page_id = "page-unapplied-1"
+            row_applied.notion_page_id = "page-applied-2"
+            session.commit()
+
+            # Only hash_active is still online
+            expired = expire_stale_postings(
+                session,
+                active_hashes={hash_active},
+                healthy_sources={"greenhouse"},
+            )
+            assert len(expired) == 2
+            assert row_unapplied.status == "rejected"
+            assert row_applied.status == "rejected"
+
+            # Mock Notion GET: page-unapplied-1 is still 'New Match', page-applied-2 is 'Applied'
+            mock_http = MagicMock()
+
+            def fake_get(url: str, **kwargs):
+                resp = MagicMock()
+                resp.status_code = 200
+                if url.endswith("page-unapplied-1"):
+                    resp.json.return_value = {
+                        "archived": False,
+                        "properties": {"Status": {"select": {"name": "New Match"}}},
+                    }
+                else:
+                    resp.json.return_value = {
+                        "archived": False,
+                        "properties": {"Status": {"select": {"name": "Applied"}}},
+                    }
+                return resp
+
+            mock_http.get.side_effect = fake_get
+            mock_patch_resp = MagicMock()
+            mock_http.patch.return_value = mock_patch_resp
+
+            archived_count = archive_expired_notion_pages(
+                session,
+                expired_rows=expired,
+                api_key="secret_test",
+                http_session=mock_http,
+            )
+            # Only the unapplied card is archived in Notion; the 'Applied' card is preserved!
+            assert archived_count == 1
+            assert row_unapplied.matched_keywords.get("notion_archived") is True
+            assert row_applied.status == "applied"
+            assert row_applied.matched_keywords.get("notion_preserved") is True
+
 

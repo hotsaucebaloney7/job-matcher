@@ -11,7 +11,7 @@ from rich.console import Console
 from sqlalchemy import Engine, select, update
 
 from src.db.models import JobPosting
-from src.db.session import get_session_factory, init_db, upsert_job_postings
+from src.db.session import expire_stale_postings, get_session_factory, init_db, upsert_job_postings
 from src.exporters.markdown_digest import (
     DEFAULT_MIN_SCORE,
     DEFAULT_REPORTS_DIR,
@@ -19,7 +19,11 @@ from src.exporters.markdown_digest import (
     get_high_scoring_new_postings,
     render_cli_table,
 )
-from src.exporters.notion_sync import is_notion_configured, sync_to_notion
+from src.exporters.notion_sync import (
+    archive_expired_notion_pages,
+    is_notion_configured,
+    sync_to_notion,
+)
 from src.ingest.adzuna_client import poll_adzuna
 from src.ingest.ats_poller import DEFAULT_CONFIG_PATH, poll_all_ats
 from src.ingest.external_apis import poll_jsearch_rapidapi, poll_remotive, poll_the_muse, poll_usajobs
@@ -47,6 +51,8 @@ def run_pipeline(
 
     # Stage 1: Ingestion (Direct ATS Poller + Remotive + The Muse + Adzuna + JSearch)
     merged_postings: Dict[str, dict] = {}
+    failed_companies: set[str] = set()
+    healthy_sources: set[str] = set()
     if not skip_ingest:
         out.print("[bold cyan]Stage 1:[/bold cyan] Polling Greenhouse, Lever, Ashby, Remotive, The Muse, Adzuna & JSearch...")
         ats_jobs, ats_stats = poll_all_ats(config_path=companies_config, console=out)
@@ -74,6 +80,13 @@ def run_pipeline(
             merged_postings.setdefault(job["job_hash"], job)
 
         all_stats = ats_stats + remotive_stats + muse_stats + adzuna_stats + jsearch_stats + usajobs_stats
+        for s in all_stats:
+            src_name = str(s.get("ats") or "").lower()
+            if s.get("status") == "OK":
+                healthy_sources.add(src_name)
+            else:
+                failed_companies.add(str(s.get("company") or ""))
+
         total_raw = sum(s["raw"] for s in all_stats)
         out.print(
             f"  • Scanned [bold]{total_raw}[/bold] raw postings across all sources -> "
@@ -88,9 +101,20 @@ def run_pipeline(
     SessionLocal = get_session_factory(db_engine)
 
     with SessionLocal() as session:
+        expired_rows: List[JobPosting] = []
         if merged_postings:
             upserted = upsert_job_postings(session, list(merged_postings.values()))
             out.print(f"  • Upserted [bold green]{upserted}[/bold green] postings into `job_postings`.")
+            expired_rows = expire_stale_postings(
+                session,
+                active_hashes=set(merged_postings.keys()),
+                healthy_sources=healthy_sources,
+                failed_companies=failed_companies,
+            )
+            if expired_rows:
+                out.print(
+                    f"  • Marked [bold yellow]{len(expired_rows)}[/bold yellow] offline/expired postings as closed."
+                )
 
         if rescore_all:
             session.execute(
@@ -131,6 +155,11 @@ def run_pipeline(
         if is_notion_configured():
             synced = sync_to_notion(session, min_score=min_score, console=out)
             out.print(f"  • Synced [bold green]{synced}[/bold green] new postings to Notion.")
+            archived = archive_expired_notion_pages(session, expired_rows=expired_rows or None, console=out)
+            if archived:
+                out.print(
+                    f"  • Archived [bold yellow]{archived}[/bold yellow] expired unapplied postings from Notion."
+                )
 
     out.rule("[bold green]Pipeline Complete[/bold green]")
     return report_path
