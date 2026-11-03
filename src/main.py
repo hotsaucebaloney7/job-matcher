@@ -43,6 +43,7 @@ def run_pipeline(
     rescore_all: bool = False,
     report_date: Optional[date] = None,
     embed_scorer: Optional[EmbeddingScorer] = None,
+    enable_notion_sync: Optional[bool] = None,
     console: Optional[Console] = None,
 ) -> Path:
     """Execute the full Job Matcher pipeline and return the generated Markdown digest path."""
@@ -152,7 +153,12 @@ def run_pipeline(
         )
         out.print(f"  • Daily Markdown Digest written to: [bold green]{report_path}[/bold green]")
 
-        if is_notion_configured():
+        should_sync_notion = (
+            enable_notion_sync
+            if enable_notion_sync is not None
+            else (engine is None and is_notion_configured())
+        )
+        if should_sync_notion:
             synced = sync_to_notion(session, min_score=min_score, console=out)
             out.print(f"  • Synced [bold green]{synced}[/bold green] new postings to Notion.")
             archived = archive_expired_notion_pages(session, expired_rows=expired_rows or None, console=out)

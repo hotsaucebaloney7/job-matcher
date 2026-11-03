@@ -229,6 +229,7 @@ class TestEndToEndPipelineOrchestrator:
             skip_ingest=True,
             report_date=date(2026, 11, 2),
             embed_scorer=dummy_embed,
+            enable_notion_sync=False,
         )
         assert report_path.exists()
         md_text = report_path.read_text(encoding="utf-8")
