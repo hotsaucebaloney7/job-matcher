@@ -199,7 +199,11 @@ def fetch_ashby_board(slug: str, company_name: str, session: requests.Session) -
             if isinstance(sec, dict) and sec.get("location")
         ]
         loc_parts = [p for p in [primary_loc, ", ".join(secondary_locs), workplace_type_hint] if p]
-        if is_remote and not any("remote" in p.lower() for p in loc_parts):
+        if (
+            is_remote
+            and workplace_type_hint.lower() not in ("hybrid", "onsite", "on-site")
+            and not any("remote" in p.lower() for p in loc_parts)
+        ):
             loc_parts.append("Remote")
         location_raw = " | ".join(dict.fromkeys(loc_parts))
 

@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 
 from src.db.models import JobPosting
 from src.db.session import get_session_factory, get_unscored_postings, init_db
+from src.scoring.filters import has_non_local_onsite_requirement
 from src.scoring.keyword_scorer import KeywordScorer
 
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
@@ -248,11 +249,16 @@ def score_unscored_postings(
         desc_body = row.description_text or ""
         combined_text = f"{row.title or ''}\n{desc_body}".strip()
         kw_score, breakdown = kw_scorer.score(combined_text, title=row.title or "")
+        fake_remote = row.workplace_type == "Remote" and has_non_local_onsite_requirement(desc_body)
+        if fake_remote:
+            breakdown["fake_remote_knockout"] = True
+            breakdown["expired_online"] = True
+
         row.keyword_score = kw_score
         row.semantic_score = sem_score
         row.matched_keywords = breakdown
 
-        if breakdown.get("experience_knockout"):
+        if breakdown.get("experience_knockout") or fake_remote:
             row.match_score = 0.0
             row.status = "rejected"
         else:

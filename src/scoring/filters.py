@@ -53,6 +53,22 @@ US_INDICATOR_PATTERN = re.compile(
 HYBRID_PATTERN = re.compile(r"\bhybrid\b", re.IGNORECASE)
 SENIOR_TITLE_PATTERN = re.compile(r"\b(?:senior|sr\.?)\b", re.IGNORECASE)
 
+# 5. High-precision detector for "fake remote" postings whose description mandates
+# out-of-state hybrid/in-office attendance or commutable residency (e.g. "3 days per week on-site in Frisco, TX").
+# Avoids matching benign phrases like "hybrid cloud", "in-office perks", or "relocation (if needed)".
+MANDATORY_ONSITE_HYBRID_PATTERN = re.compile(
+    r"(?:"
+    r"\bthis\s+is\s+a\s+hybrid\s+(?:role|position|opportunity)\b|"
+    r"\bwe\s+use\s+a\s+hybrid\s+work\s+model\b|"
+    r"\blocation[- ]based\s+hybrid\s+policy\b|"
+    r"\b(?:\d+|one|two|three|four|five)\s+days?\s+(?:per|a)\s+week\s+(?:on[- ]site|in\s+(?:the\s+)?office)\b|"
+    r"\bin\s+(?:the\s+)?office\s+(?:\d+|one|two|three|four|five)\s+days?\s+(?:per|a)\s+week\b|"
+    r"\bmust\s+(?:reside|live)\s+within\s+(?:a\s+)?commutable\s+distance\b|"
+    r"\bexpect\s+all\s+staff\s+to\s+be\s+in\s+one\s+of\s+our\b"
+    r")",
+    re.IGNORECASE,
+)
+
 # Experience extraction regexes:
 # Matches phrases like "3+ years of experience", "3-5 years of experience",
 # "minimum of 4 years", "at least 2 years of professional experience",
@@ -209,6 +225,20 @@ def classify_location(location_raw: Optional[str]) -> Optional[WorkplaceType]:
     return None
 
 
+def has_non_local_onsite_requirement(description_text: Optional[str]) -> bool:
+    """Return True if a 'Remote' job's description explicitly mandates non-local hybrid/on-site attendance."""
+    if not description_text:
+        return False
+    for match in MANDATORY_ONSITE_HYBRID_PATTERN.finditer(description_text):
+        # Check a +/- 120 char window around the mandate; if it's hybrid in Raleigh/RTP, allow it
+        start = max(0, match.start() - 120)
+        end = min(len(description_text), match.end() + 120)
+        context = description_text[start:end]
+        if not LOCAL_RTP_PATTERN.search(context):
+            return True
+    return False
+
+
 def evaluate_posting(
     company: str,
     title: str,
@@ -232,6 +262,14 @@ def evaluate_posting(
         return False, None, None, f"Location rejected ({location_raw!r})"
 
     if description_text:
+        if workplace_type == "Remote" and has_non_local_onsite_requirement(description_text):
+            return (
+                False,
+                None,
+                None,
+                "Fake remote rejected: description requires non-local hybrid/on-site attendance",
+            )
+
         min_years = extract_min_years_experience(description_text)
         if min_years is not None and min_years > max_experience_years:
             return False, None, None, f"Requires {min_years}+ years experience (max {max_experience_years})"

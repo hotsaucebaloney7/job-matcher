@@ -211,3 +211,67 @@ class TestATSPollerParsers:
         assert job["workplace_type"] == "Hybrid"
         assert job["salary_min"] == 140000
         assert job["salary_max"] == 175000
+
+
+class TestFakeRemoteAndHybridDetection:
+    """Verify fake-remote out-of-state hybrid knockouts and zero false positives on legitimate remote perks."""
+
+    def test_rejects_fake_remote_with_out_of_state_hybrid_mandate(self) -> None:
+        # 1. Kyndryl Frisco TX 3-day onsite mandate disguised as 'Dallas, TX | Flexible / Remote'
+        passed, wt, _, reason = evaluate_posting(
+            company="Kyndryl",
+            title="Data Engineer",
+            location_raw="Dallas, TX | Flexible / Remote",
+            description_text=(
+                "This is a hybrid role requiring a minimum of 3 days per week on-site in Frisco, TX. "
+                "Candidates must reside within a commutable distance."
+            ),
+        )
+        assert passed is False
+        assert wt is None
+        assert "Fake remote" in reason
+
+        # 2. OpenAI Bellevue WA hybrid work model
+        passed2, _, _, _ = evaluate_posting(
+            company="OpenAI",
+            title="Data Engineer",
+            location_raw="Seattle | Remote",
+            description_text="This role is based in Bellevue. We use a hybrid work model of 3 days in the office per week.",
+        )
+        assert passed2 is False
+
+    def test_preserves_legitimate_remote_with_hybrid_cloud_or_office_perks(self) -> None:
+        # 1. Ramp remote role with optional in-office perks & relocation (if needed)
+        passed, wt, _, _ = evaluate_posting(
+            company="Ramp",
+            title="Machine Learning Engineer",
+            location_raw="Remote (US)",
+            description_text=(
+                "Build ML models in Python and PyTorch. "
+                "Benefits: In-office perks: lunch, snacks, drinks. "
+                "Relocation expense coverage to NYC or SF (if needed)."
+            ),
+        )
+        assert passed is True
+        assert wt == "Remote"
+
+        # 2. Remote role mentioning 'hybrid and cloud-native environments'
+        passed2, wt2, _, _ = evaluate_posting(
+            company="CloudCo",
+            title="Data Engineer",
+            location_raw="Remote - US",
+            description_text="Architect distributed systems across hybrid and cloud-native environments.",
+        )
+        assert passed2 is True
+        assert wt2 == "Remote"
+
+        # 3. Local Raleigh hybrid role mentioning 3 days per week on-site in Raleigh, NC
+        passed3, wt3, _, _ = evaluate_posting(
+            company="RTPTech",
+            title="AI Engineer",
+            location_raw="Raleigh, NC | Flexible / Remote",
+            description_text="This is a hybrid role requiring 3 days per week on-site in Raleigh, NC.",
+        )
+        assert passed3 is True
+        assert wt3 == "Local"
+
