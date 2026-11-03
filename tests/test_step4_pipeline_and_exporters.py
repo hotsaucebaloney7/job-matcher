@@ -319,7 +319,7 @@ class TestAshbyAndExternalAggregatorClients:
         assert len(muse_jobs) == 1
         assert muse_jobs[0]["workplace_type"] == "Local"
 
-        # 3. JSearch (Google for Jobs) mock
+        # 3. JSearch (Google for Jobs) mock — verifies direct apply_options priority & scraper blocking
         jsearch_resp = MagicMock()
         jsearch_resp.json.return_value = {
             "data": [
@@ -335,15 +335,31 @@ class TestAshbyAndExternalAggregatorClients:
                     "job_min_salary": 135000,
                     "job_max_salary": 165000,
                     "job_salary_period": "YEAR",
-                    "job_apply_link": "https://example.com/apply/js-1",
+                    "job_apply_link": "https://www.indeed.com/viewjob?jk=indirect123",
+                    "apply_options": [
+                        {"publisher": "Indeed", "apply_link": "https://www.indeed.com/viewjob?jk=indirect123", "is_direct": False},
+                        {"publisher": "RTP BioAI Careers", "apply_link": "https://careers.rtpbioai.com/jobs/js-1", "is_direct": True},
+                    ],
                     "job_required_experience": {"required_experience_in_months": 36},
-                }
+                },
+                {
+                    "job_id": "js-blocked",
+                    "job_title": "Data Scientist",
+                    "employer_name": "StaleScraperCo",
+                    "job_city": "Raleigh",
+                    "job_state": "NC",
+                    "job_country": "US",
+                    "job_is_remote": False,
+                    "job_description": "2+ years of Python experience.",
+                    "job_apply_link": "https://www.learn4good.com/jobs/stale-1",
+                },
             ]
         }
         mock_session.get.return_value = jsearch_resp
         js_jobs, _ = poll_jsearch_rapidapi(rapidapi_key="test_rapid_key", session=mock_session)
         assert len(js_jobs) == 1
         assert js_jobs[0]["company"] == "RTP BioAI"
+        assert js_jobs[0]["url"] == "https://careers.rtpbioai.com/jobs/js-1"
         assert js_jobs[0]["salary_min"] == 135000
 
         # 4. USAJOBS mock

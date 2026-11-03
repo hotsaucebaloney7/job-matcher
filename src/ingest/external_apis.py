@@ -19,6 +19,44 @@ load_dotenv(dotenv_path=ENV_PATH)
 REQUEST_TIMEOUT_SECONDS = 15
 USER_AGENT = "JobMatcher/1.0 (+local-personal-job-search)"
 
+BLOCKED_SCRAPER_DOMAINS = (
+    "jobleads.com",
+    "trabajo.org",
+    "bebee.com",
+    "jobrapido.com",
+    "learn4good.com",
+    "jobmesh.io",
+    "lensa.com",
+)
+
+
+def _is_blocked_scraper_url(url: str) -> bool:
+    u_low = (url or "").lower()
+    return any(domain in u_low for domain in BLOCKED_SCRAPER_DOMAINS)
+
+
+def _select_best_jsearch_apply_url(item: Dict[str, Any]) -> Optional[str]:
+    """Select the highest-trust apply URL from JSearch, preferring direct employer links."""
+    options = item.get("apply_options") or []
+    if isinstance(options, list):
+        # 1. Prefer direct employer ATS / career site links
+        for opt in options:
+            if isinstance(opt, dict) and opt.get("is_direct") is True:
+                link = (opt.get("apply_link") or "").strip()
+                if link and not _is_blocked_scraper_url(link):
+                    return link[:768]
+        # 2. Next, accept reputable boards that aren't paywall/stale scraper sites
+        for opt in options:
+            if isinstance(opt, dict):
+                link = (opt.get("apply_link") or "").strip()
+                if link and not _is_blocked_scraper_url(link):
+                    return link[:768]
+
+    fallback = (item.get("job_apply_link") or item.get("job_google_link") or "").strip()
+    if fallback and not _is_blocked_scraper_url(fallback):
+        return fallback[:768]
+    return None
+
 
 def _parse_iso_dt(value: Optional[str]) -> Optional[datetime]:
     if not value:
@@ -262,7 +300,7 @@ def poll_jsearch_rapidapi(
             "params": {
                 "query": "Data Scientist in Raleigh, NC",
                 "num_pages": "1",
-                "date_posted": "month",
+                "date_posted": "week",
             },
         },
         {
@@ -270,7 +308,7 @@ def poll_jsearch_rapidapi(
             "params": {
                 "query": "AI Engineer Machine Learning Engineer in Raleigh, NC",
                 "num_pages": "1",
-                "date_posted": "month",
+                "date_posted": "week",
             },
         },
         {
@@ -326,6 +364,15 @@ def poll_jsearch_rapidapi(
                         # 72+ months = 6+ years -> knockout
                         continue
 
+                    # Skip if JSearch metadata indicates the offer has already expired
+                    exp_dt = _parse_iso_dt(item.get("job_offer_expiration_datetime_utc"))
+                    if exp_dt is not None and exp_dt < datetime.utcnow():
+                        continue
+
+                    apply_url = _select_best_jsearch_apply_url(item)
+                    if not apply_url:
+                        continue
+
                     passed, workplace_type, job_hash, _ = evaluate_posting(
                         company=company,
                         title=title,
@@ -354,7 +401,7 @@ def poll_jsearch_rapidapi(
                             "workplace_type": workplace_type,
                             "salary_min": int(sal_min) if isinstance(sal_min, (int, float)) else None,
                             "salary_max": int(sal_max) if isinstance(sal_max, (int, float)) else None,
-                            "url": (item.get("job_apply_link") or item.get("job_google_link") or "")[:768],
+                            "url": apply_url,
                             "description_text": description_text,
                             "date_posted": _parse_iso_dt(item.get("job_posted_at_datetime_utc")),
                         },
