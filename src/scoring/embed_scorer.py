@@ -146,8 +146,48 @@ def compute_composite_score(
     return round(min(max(composite, 0.0), 100.0), 2)
 
 
+DEFAULT_CHUNK_WORDS = 260
+DEFAULT_CHUNK_OVERLAP = 50
+MAX_CHUNKS_PER_DOC = 6
+
+
+def split_into_chunks(
+    text: str,
+    chunk_words: int = DEFAULT_CHUNK_WORDS,
+    overlap_words: int = DEFAULT_CHUNK_OVERLAP,
+    max_chunks: int = MAX_CHUNKS_PER_DOC,
+    prepend_header: bool = True,
+) -> List[str]:
+    """Split a long document into overlapping word windows that fit inside a 512-token Transformer window.
+
+    When `prepend_header=True`, the first line (typically the job title) is prepended to subsequent
+    chunks so every chunk retains role-level context even when separated from the intro paragraph.
+    """
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return []
+
+    words = cleaned.split()
+    if len(words) <= chunk_words:
+        return [cleaned]
+
+    first_line = cleaned.splitlines()[0].strip()[:120]
+    step = max(1, chunk_words - overlap_words)
+    chunks: List[str] = []
+
+    for start_idx in range(0, len(words), step):
+        window = " ".join(words[start_idx : start_idx + chunk_words])
+        if start_idx > 0 and prepend_header and first_line and not window.startswith(first_line):
+            window = f"{first_line}\n{window}"
+        chunks.append(window)
+        if len(chunks) >= max_chunks or (start_idx + chunk_words >= len(words)):
+            break
+
+    return chunks
+
+
 class EmbeddingScorer:
-    """Encodes the user's resume and job descriptions using BAAI/bge-small-en-v1.5."""
+    """Encodes the user's resume and job descriptions using BAAI/bge-small-en-v1.5 with multi-chunk pooling."""
 
     def __init__(
         self,
@@ -156,6 +196,8 @@ class EmbeddingScorer:
         resume_path: Optional[Path] = None,
         model_name: str = DEFAULT_MODEL_NAME,
         model: Optional[Any] = None,
+        chunk_words: int = DEFAULT_CHUNK_WORDS,
+        overlap_words: int = DEFAULT_CHUNK_OVERLAP,
     ) -> None:
         if resume_text is not None:
             self.resume_text = resume_text
@@ -168,7 +210,10 @@ class EmbeddingScorer:
 
         self.model_name = model_name
         self._model = model
+        self.chunk_words = chunk_words
+        self.overlap_words = overlap_words
         self._resume_embedding: Optional[np.ndarray] = None
+        self._resume_chunk_embeddings: Optional[np.ndarray] = None
 
     @property
     def model(self) -> Any:
@@ -179,51 +224,128 @@ class EmbeddingScorer:
             self._model = SentenceTransformer(self.model_name)
         return self._model
 
-    @property
-    def resume_embedding(self) -> np.ndarray:
-        """Return L2-normalized embedding vector for the active resume."""
-        if self._resume_embedding is None:
-            vec = self.model.encode(
-                self.resume_text,
-                normalize_embeddings=True,
-                show_progress_bar=False,
-            )
-            self._resume_embedding = np.asarray(vec, dtype=np.float32)
-        return self._resume_embedding
+    def _ensure_resume_encoded(self) -> None:
+        """Encode all overlapping chunks of the active resume and compute L2-normalized mean + chunk vectors."""
+        if self._resume_embedding is not None and self._resume_chunk_embeddings is not None:
+            return
 
-    def score(self, description_text: str) -> float:
-        """Compute cosine similarity between resume and description_text scaled to 0–100."""
-        if not description_text or not description_text.strip():
-            return 0.0
-        desc_vec = self.model.encode(
-            description_text,
+        chunks = split_into_chunks(
+            self.resume_text,
+            chunk_words=self.chunk_words,
+            overlap_words=self.overlap_words,
+            prepend_header=False,
+        ) or [" "]
+
+        raw_vecs = self.model.encode(
+            chunks,
             normalize_embeddings=True,
             show_progress_bar=False,
         )
-        desc_arr = np.asarray(desc_vec, dtype=np.float32)
-        cos_sim = float(np.dot(self.resume_embedding, desc_arr))
+        chunk_mat = np.asarray(raw_vecs, dtype=np.float32)
+        if chunk_mat.ndim == 1:
+            chunk_mat = chunk_mat.reshape(1, -1)
+
+        self._resume_chunk_embeddings = chunk_mat
+        mean_vec = np.mean(chunk_mat, axis=0)
+        norm = float(np.linalg.norm(mean_vec))
+        self._resume_embedding = (mean_vec / norm) if norm > 0 else mean_vec
+
+    @property
+    def resume_embedding(self) -> np.ndarray:
+        """Return L2-normalized mean embedding vector across the entire active resume."""
+        self._ensure_resume_encoded()
+        assert self._resume_embedding is not None
+        return self._resume_embedding
+
+    @property
+    def resume_chunk_embeddings(self) -> np.ndarray:
+        """Return (M, D) matrix of L2-normalized chunk embeddings for the active resume."""
+        self._ensure_resume_encoded()
+        assert self._resume_chunk_embeddings is not None
+        return self._resume_chunk_embeddings
+
+    def _aggregate_chunk_vecs(self, desc_chunk_mat: np.ndarray) -> float:
+        """Aggregate similarity across job description chunks, ignoring low-signal boilerplate chunks."""
+        if desc_chunk_mat.ndim == 1:
+            desc_chunk_mat = desc_chunk_mat.reshape(1, -1)
+
+        # Similarity of each job chunk against the full-resume mean vector
+        mean_sims = np.dot(desc_chunk_mat, self.resume_embedding)
+        # Similarity of each job chunk against the best-matching resume section chunk
+        section_sims = np.max(np.dot(desc_chunk_mat, self.resume_chunk_embeddings.T), axis=1)
+        # Blend global resume fit (70%) with best resume section fit (30%) per job chunk
+        chunk_scores = 0.70 * mean_sims + 0.30 * section_sims
+
+        if len(chunk_scores) == 1:
+            cos_sim = float(chunk_scores[0])
+        else:
+            sorted_desc = np.sort(chunk_scores)[::-1]
+            # Weight the strongest technical chunk (65%) and second strongest chunk (35%),
+            # preventing EEO/company-intro boilerplate chunks from diluting the score.
+            cos_sim = float(0.65 * sorted_desc[0] + 0.35 * sorted_desc[1])
+
         scaled = min(max(cos_sim * 100.0, 0.0), 100.0)
         return round(scaled, 2)
 
+    def score(self, description_text: str) -> float:
+        """Compute multi-chunk cosine similarity between resume and description_text scaled to 0–100."""
+        if not description_text or not description_text.strip():
+            return 0.0
+        chunks = split_into_chunks(
+            description_text,
+            chunk_words=self.chunk_words,
+            overlap_words=self.overlap_words,
+            prepend_header=True,
+        )
+        vecs = self.model.encode(
+            chunks,
+            normalize_embeddings=True,
+            show_progress_bar=False,
+        )
+        desc_mat = np.asarray(vecs, dtype=np.float32)
+        return self._aggregate_chunk_vecs(desc_mat)
+
     def score_batch(self, descriptions: Sequence[str]) -> List[float]:
-        """Encode a batch of job descriptions and return 0–100 semantic similarity scores."""
+        """Encode a batch of job descriptions using vectorized multi-chunk pooling and return 0–100 scores."""
         if not descriptions:
             return []
-        cleaned = [d if (d and d.strip()) else " " for d in descriptions]
+
+        all_chunks: List[str] = []
+        doc_slices: List[Optional[Tuple[int, int]]] = []
+
+        for desc in descriptions:
+            if not desc or not desc.strip():
+                doc_slices.append(None)
+                continue
+            chunks = split_into_chunks(
+                desc,
+                chunk_words=self.chunk_words,
+                overlap_words=self.overlap_words,
+                prepend_header=True,
+            )
+            start = len(all_chunks)
+            all_chunks.extend(chunks)
+            doc_slices.append((start, len(all_chunks)))
+
+        if not all_chunks:
+            return [0.0 for _ in descriptions]
+
         vecs = self.model.encode(
-            cleaned,
+            all_chunks,
             normalize_embeddings=True,
             show_progress_bar=False,
         )
         mat = np.asarray(vecs, dtype=np.float32)
-        sims = np.dot(mat, self.resume_embedding)
+        if mat.ndim == 1:
+            mat = mat.reshape(1, -1)
+
         scores: List[float] = []
-        for idx, orig in enumerate(descriptions):
-            if not orig or not orig.strip():
+        for sl in doc_slices:
+            if sl is None:
                 scores.append(0.0)
             else:
-                val = min(max(float(sims[idx]) * 100.0, 0.0), 100.0)
-                scores.append(round(val, 2))
+                start, end = sl
+                scores.append(self._aggregate_chunk_vecs(mat[start:end]))
         return scores
 
 

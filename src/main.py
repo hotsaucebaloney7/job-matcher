@@ -119,7 +119,9 @@ def run_pipeline(
 
         if rescore_all:
             session.execute(
-                update(JobPosting).values(
+                update(JobPosting)
+                .where(JobPosting.status != "rejected")
+                .values(
                     keyword_score=None,
                     semantic_score=None,
                     match_score=None,
@@ -127,7 +129,7 @@ def run_pipeline(
                 )
             )
             session.commit()
-            out.print("  • Reset existing scores (`--rescore` enabled).")
+            out.print("  • Reset existing scores on active postings (`--rescore` enabled).")
 
         # Stage 3: Hybrid Keyword + Local BGE Embedding Scoring
         out.print("[bold cyan]Stage 3:[/bold cyan] Scoring unscored postings against active resume...")

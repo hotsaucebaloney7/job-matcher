@@ -17,6 +17,7 @@ from src.scoring.embed_scorer import (
     discover_resume_file,
     load_resume_text,
     score_unscored_postings,
+    split_into_chunks,
 )
 from src.scoring.filters import compute_job_hash, evaluate_posting, extract_min_years_experience
 from src.scoring.keyword_scorer import KeywordScorer
@@ -130,6 +131,26 @@ class TestHybridEmbeddingAndCompositeScoring:
 
         composite = compute_composite_score(keyword_score=80.0, semantic_score=90.0)
         assert composite == 85.0
+
+    def test_multi_chunk_encoding_handles_long_descriptions_with_intro_fluff(self) -> None:
+        emb_scorer = EmbeddingScorer(
+            resume_text="Python PyTorch RAG Engineer",
+            model=DummyEncoder(),
+            chunk_words=50,
+            overlap_words=10,
+        )
+        # 60 words of generic company intro fluff followed by technical requirements in chunk 2 & 3
+        intro_fluff = " ".join(["company"] * 60)
+        tech_section = " ".join(["Python PyTorch RAG"] * 30)
+        long_desc = f"AI Engineer\n{intro_fluff} {tech_section}"
+
+        chunks = split_into_chunks(long_desc, chunk_words=50, overlap_words=10)
+        assert len(chunks) >= 2
+        assert chunks[1].startswith("AI Engineer\n")
+
+        # Multi-chunk top-2 pooling should score 100.0 from the technical chunks despite intro fluff
+        assert emb_scorer.score(long_desc) == 100.0
+        assert emb_scorer.score_batch([long_desc]) == [100.0]
 
     def test_score_unscored_postings_updates_database(self) -> None:
         engine = get_engine("sqlite+pysqlite:///:memory:")
