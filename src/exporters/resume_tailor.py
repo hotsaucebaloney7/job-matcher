@@ -36,6 +36,7 @@ load_dotenv(dotenv_path=ENV_PATH)
 
 DEFAULT_TAILORED_DIR = DEFAULT_DATA_DIR / "tailored"
 NOTION_BLOCKS_URL = "https://api.notion.com/v1/blocks"
+NOTION_FILE_UPLOADS_URL = "https://api.notion.com/v1/file_uploads"
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 
@@ -317,6 +318,51 @@ def _chunk_text_for_notion(text: str, max_len: int = 1900) -> List[str]:
     return chunks
 
 
+def _upload_txt_to_notion(
+    client: requests.Session,
+    api_key: str,
+    filename: str,
+    content_text: str,
+) -> Optional[str]:
+    """Upload a plain-text prompt file via Notion's File Uploads API and return the file_upload ID."""
+    json_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": NOTION_VERSION,
+    }
+    multipart_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Notion-Version": NOTION_VERSION,
+    }
+    try:
+        init_resp = client.post(
+            NOTION_FILE_UPLOADS_URL,
+            headers=json_headers,
+            json={"filename": filename, "content_type": "text/plain"},
+            timeout=15,
+        )
+        if getattr(init_resp, "status_code", 0) != 200:
+            return None
+        init_data = init_resp.json() if callable(getattr(init_resp, "json", None)) else {}
+        if not isinstance(init_data, dict):
+            return None
+        upload_id = init_data.get("id")
+        if not upload_id or not isinstance(upload_id, str):
+            return None
+
+        send_resp = client.post(
+            f"{NOTION_FILE_UPLOADS_URL}/{upload_id}/send",
+            headers=multipart_headers,
+            files={"file": (filename, content_text.encode("utf-8"), "text/plain")},
+            timeout=20,
+        )
+        if getattr(send_resp, "status_code", 0) != 200:
+            return None
+        return upload_id
+    except Exception:
+        return None
+
+
 def write_tailoring_to_notion_page(
     page_id: str,
     job: Dict[str, Any],
@@ -326,7 +372,7 @@ def write_tailoring_to_notion_page(
     api_key: Optional[str] = None,
     http_session: Optional[requests.Session] = None,
 ) -> bool:
-    """Append an Argon Tailoring Kit (with local .txt file path and full prompt) inside the Notion card's page body."""
+    """Append an Argon Tailoring Kit (with clickable .txt attachment + full prompt) inside the Notion card's page body."""
     resolved_key = (api_key if api_key is not None else os.getenv("NOTION_API_KEY", "")).strip()
     if not (resolved_key and page_id):
         return False
@@ -346,103 +392,7 @@ def write_tailoring_to_notion_page(
     missing_summary = ", ".join(missing_groups) if missing_groups else "None flagged"
     resolved_file_str = str(prompt_file_path.resolve()) if prompt_file_path is not None else str(DEFAULT_TAILORED_DIR.resolve())
     folder_str = str((prompt_file_path.parent if prompt_file_path is not None else DEFAULT_TAILORED_DIR).resolve())
-
-    children: List[Dict[str, Any]] = [
-        {"object": "block", "type": "divider", "divider": {}},
-        {
-            "object": "block",
-            "type": "heading_2",
-            "heading_2": {
-                "rich_text": [{"type": "text", "text": {"content": "🎯 Argon Resume Tailoring Kit"}}]
-            },
-        },
-        {
-            "object": "block",
-            "type": "callout",
-            "callout": {
-                "icon": {"type": "emoji", "emoji": "📂"},
-                "color": "blue_background",
-                "rich_text": [
-                    {
-                        "type": "text",
-                        "text": {
-                            "content": (
-                                f"📄 Plain-Text Prompt File: {resolved_file_str}\n"
-                                f"📁 Tailored Folder: {folder_str}\n"
-                                f"✅ Matched Skills: {matched_summary}\n"
-                                f"🎯 Missing ATS Keywords to Weave In: {missing_summary}"
-                            )[:1950]
-                        },
-                    }
-                ],
-            },
-        },
-        {
-            "object": "block",
-            "type": "code",
-            "code": {
-                "language": "powershell",
-                "rich_text": [
-                    {
-                        "type": "text",
-                        "text": {
-                            "content": f'Get-Content -LiteralPath "{resolved_file_str}" -Raw -Encoding UTF8 | Set-Clipboard'
-                        },
-                    }
-                ],
-            },
-        },
-    ]
-
-    if tailored_output:
-        children.append(
-            {
-                "object": "block",
-                "type": "heading_3",
-                "heading_3": {
-                    "rich_text": [{"type": "text", "text": {"content": "🤖 Tailored Resume Output"}}]
-                },
-            }
-        )
-        for chunk in _chunk_text_for_notion(tailored_output):
-            children.append(
-                {
-                    "object": "block",
-                    "type": "paragraph",
-                    "paragraph": {
-                        "rich_text": [{"type": "text", "text": {"content": chunk}}]
-                    },
-                }
-            )
-
-    # Embed the full untruncated Argon prompt inside a SINGLE code block
-    prompt_chunks = _chunk_text_for_notion(single_job_prompt)
-    unified_code_block = {
-        "object": "block",
-        "type": "code",
-        "code": {
-            "language": "plain text",
-            "rich_text": [
-                {"type": "text", "text": {"content": chunk}}
-                for chunk in prompt_chunks[:95]
-            ],
-        },
-    }
-    children.append(
-        {
-            "object": "block",
-            "type": "toggle",
-            "toggle": {
-                "rich_text": [
-                    {
-                        "type": "text",
-                        "text": {"content": "📋 Full Untruncated Gemini 4 Argon Prompt (Click to expand, then click Copy once)"},
-                    }
-                ],
-                "children": [unified_code_block],
-            },
-        }
-    )
+    filename_only = prompt_file_path.name if prompt_file_path is not None else "Argon_Prompt.txt"
 
     try:
         existing_resp = client.get(
@@ -454,15 +404,127 @@ def write_tailoring_to_notion_page(
             existing_blocks = (existing_resp.json() or {}).get("results") or []
             if isinstance(existing_blocks, list):
                 for blk in existing_blocks:
-                    if isinstance(blk, dict) and blk.get("type") == "toggle":
-                        txt = _extract_notion_text(blk.get("toggle") or {})
-                        if "Full Untruncated Gemini 4 Argon Prompt" in txt:
-                            return True
-                    # Clean up previous blocks so we replace cleanly with the untruncated version + file path
-                    if isinstance(blk, dict) and blk.get("type") in ("divider", "heading_2", "callout", "code", "toggle"):
+                    if isinstance(blk, dict) and blk.get("type") == "file":
+                        return True
+                    # Clean up previous blocks so we replace cleanly with the clickable .txt attachment version
+                    if isinstance(blk, dict) and blk.get("type") in (
+                        "divider",
+                        "heading_2",
+                        "callout",
+                        "code",
+                        "toggle",
+                        "file",
+                    ):
                         blk_id = blk.get("id")
                         if blk_id and hasattr(client, "delete"):
                             client.delete(f"{NOTION_BLOCKS_URL}/{blk_id}", headers=headers, timeout=15)
+
+        children: List[Dict[str, Any]] = [
+            {"object": "block", "type": "divider", "divider": {}},
+            {
+                "object": "block",
+                "type": "heading_2",
+                "heading_2": {
+                    "rich_text": [{"type": "text", "text": {"content": "🎯 Argon Resume Tailoring Kit"}}]
+                },
+            },
+            {
+                "object": "block",
+                "type": "callout",
+                "callout": {
+                    "icon": {"type": "emoji", "emoji": "📂"},
+                    "color": "blue_background",
+                    "rich_text": [
+                        {
+                            "type": "text",
+                            "text": {
+                                "content": (
+                                    f"✅ Matched Skills: {matched_summary}\n"
+                                    f"🎯 Missing ATS Keywords to Weave In: {missing_summary}\n"
+                                    f"📁 Local Copy: {resolved_file_str}\n"
+                                    f"👇 Click the .txt file below to open directly in your default text editor!"
+                                )[:1950]
+                            },
+                        }
+                    ],
+                },
+            },
+        ]
+
+        # Upload the .txt file directly to Notion so the user gets a native clickable .txt attachment block!
+        upload_id = _upload_txt_to_notion(
+            client=client,
+            api_key=resolved_key,
+            filename=filename_only,
+            content_text=single_job_prompt,
+        )
+        if upload_id:
+            children.append(
+                {
+                    "object": "block",
+                    "type": "file",
+                    "file": {
+                        "type": "file_upload",
+                        "file_upload": {"id": upload_id},
+                        "caption": [
+                            {
+                                "type": "text",
+                                "text": {"content": f"Click to open {filename_only} in your default .txt editor"},
+                            }
+                        ],
+                    },
+                }
+            )
+
+        if tailored_output:
+            children.append(
+                {
+                    "object": "block",
+                    "type": "heading_3",
+                    "heading_3": {
+                        "rich_text": [{"type": "text", "text": {"content": "🤖 Tailored Resume Output"}}]
+                    },
+                }
+            )
+            for chunk in _chunk_text_for_notion(tailored_output):
+                children.append(
+                    {
+                        "object": "block",
+                        "type": "paragraph",
+                        "paragraph": {
+                            "rich_text": [{"type": "text", "text": {"content": chunk}}]
+                        },
+                    }
+                )
+
+        # Also keep the full untruncated Argon prompt inside a collapsible toggle block
+        prompt_chunks = _chunk_text_for_notion(single_job_prompt)
+        unified_code_block = {
+            "object": "block",
+            "type": "code",
+            "code": {
+                "language": "plain text",
+                "rich_text": [
+                    {"type": "text", "text": {"content": chunk}}
+                    for chunk in prompt_chunks[:95]
+                ],
+            },
+        }
+        children.append(
+            {
+                "object": "block",
+                "type": "toggle",
+                "toggle": {
+                    "rich_text": [
+                        {
+                            "type": "text",
+                            "text": {"content": "📋 Full Untruncated Gemini 4 Argon Prompt (Click to expand, then click Copy once)"},
+                        }
+                    ],
+                    "children": [unified_code_block],
+                },
+            }
+        )
 
         resp = client.patch(
             f"{NOTION_BLOCKS_URL}/{page_id}/children",
