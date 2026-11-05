@@ -36,6 +36,7 @@ Use this skill whenever the user asks to tailor their resume for jobs in their N
    - **3. ATS Skills & Keywords Alignment:** List which **Missing Skill Groups** from the prompt packet can be truthfully highlighted in the Technical Skills section or project descriptions.
    - **4. 3-Sentence Cover Letter / Cold Outreach Hook:** A concise opening paragraph ready to paste into the application portal.
 
-4. **Always Save a Consistently Named `.docx` File in `data/tailored/`:**
+4. **Always Save a Consistently Named `.docx` File in `data/tailored/` & Clean Up Temporary `.txt`/`.md` Files:**
    - Load the user's active `.docx` resume in `data/` using `python-docx` (`from docx import Document`), apply the tailored Professional Summary, Technical Skills additions, and top bullet adjustments while preserving paragraph/run styling, and save the file using this exact naming convention so future runs automatically detect it and skip it:
      `data/tailored/Josh_Engelhardt_Resume_<Company_Slug>_<Title_Slug>.docx`
+   - Once the tailored `.docx` resume file(s) are saved in `data/tailored/`, **delete any `.txt` or `.md` prompt files** in `data/tailored/` (`Remove-Item data\tailored\*.txt, data\tailored\*.md -Force`) so the `data/tailored/` folder only contains clean, ready-to-upload `.docx` resumes!

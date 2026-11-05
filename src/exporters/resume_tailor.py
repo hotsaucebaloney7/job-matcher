@@ -548,19 +548,38 @@ def _slugify(value: str) -> str:
     return cleaned.strip("_")[:40] or "Job"
 
 
+_STOP_WORDS = {"the", "inc", "llc", "corp", "corporation", "company", "group", "services", "financial"}
+
+
+def _meaningful_tokens(text: str) -> List[str]:
+    """Extract lowercase alphanumeric tokens excluding corporate stopwords."""
+    raw = [t.lower() for t in re.findall(r"[a-zA-Z0-9]+", text or "")]
+    return [t for t in raw if t not in _STOP_WORDS and len(t) >= 2]
+
+
 def find_existing_tailored_resume(
     company: str,
     title: str,
     output_dir: Path = DEFAULT_TAILORED_DIR,
 ) -> Optional[Path]:
-    """Return an existing tailored resume file (.docx, .pdf, .md) in `data/tailored/` if one was already generated."""
+    """Return an existing tailored resume file (.docx, .pdf) in `data/tailored/` if one was already generated."""
     if not output_dir.exists():
         return None
 
     company_slug = _slugify(company).lower()
-    full_slug = f"{company_slug}_{_slugify(title).lower()}"
+    title_slug = _slugify(title).lower()
+    full_slug = f"{company_slug}_{title_slug}"
 
-    candidates: List[Path] = []
+    company_tokens = _meaningful_tokens(company)
+    primary_company_token = company_tokens[0] if company_tokens else company_slug
+    title_tokens = [
+        t for t in _meaningful_tokens(title)
+        if t not in {"senior", "jr", "junior", "ii", "iii", "iv", "staff", "lead"}
+    ]
+
+    best_match: Optional[Path] = None
+    best_score = 0
+
     for p in output_dir.iterdir():
         if not p.is_file():
             continue
@@ -570,18 +589,35 @@ def find_existing_tailored_resume(
             continue
         if p.suffix.lower() not in {".docx", ".pdf", ".md", ".txt"}:
             continue
-        if full_slug in name_low or (
-            company_slug
-            and len(company_slug) >= 3
-            and company_slug in name_low
-            and ("resume" in name_low or "tailored" in name_low)
-        ):
-            candidates.append(p)
 
-    if not candidates:
-        return None
-    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    return candidates[0]
+        # Exact full slug match
+        if full_slug and full_slug in name_low:
+            return p
+
+        # Check if primary company token is in the filename
+        has_company = (
+            (company_slug and len(company_slug) >= 3 and company_slug in name_low)
+            or (primary_company_token and len(primary_company_token) >= 3 and primary_company_token in name_low)
+        )
+        if not has_company:
+            continue
+
+        # Count how many distinctive title tokens appear in the filename
+        file_tokens = set(_meaningful_tokens(p.stem))
+        overlap = sum(1 for t in title_tokens if t in file_tokens or t in name_low)
+        # Distinguish e.g. "Reddit Ads Integrity" (2 overlap) vs "Reddit Ads" (1 overlap: 'ads', not 'integrity')
+        non_matching_file_tokens = file_tokens - set(company_tokens) - {"josh", "engelhardt", "resume", "tailored", "ds", "ml", "ai"}
+        extra_penalty = len(non_matching_file_tokens - set(title_tokens))
+
+        score = overlap * 10 - extra_penalty
+        if overlap >= 1 and score > best_score:
+            best_score = score
+            best_match = p
+        elif best_match is None and ("resume" in name_low or "tailored" in name_low) and len(company_tokens) == 1 and company_tokens[0] != "reddit":
+            # Single-job company match (e.g. Ampcus -> Josh_Engelhardt_Resume_Ampcus_Applied_AI.docx)
+            best_match = p
+
+    return best_match
 
 
 def process_want_to_apply_queue(
@@ -638,8 +674,8 @@ def process_want_to_apply_queue(
     if console and skipped_existing:
         for sjob in skipped_existing:
             console.print(
-                f"[dim cyan]⏭️  Skipping already-tailored job:[/dim cyan] "
-                f"[bold]{sjob['company']} — {sjob['title']}[/bold] "
+                f"[dim cyan][SKIP] Already tailored:[/dim cyan] "
+                f"[bold]{sjob['company']} - {sjob['title']}[/bold] "
                 f"(Found: [green]{sjob['existing_resume_file'].name}[/green])"
             )
 
