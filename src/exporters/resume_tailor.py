@@ -397,19 +397,21 @@ def write_tailoring_to_notion_page(
                 }
             )
 
-    # Also embed the copy-ready Argon prompt inside a collapsible toggle block
+    # Embed the entire copy-ready Argon prompt inside a SINGLE code block by passing multiple
+    # <=1900-char rich_text objects in the same `rich_text` array (Notion allows up to 100 per block).
+    # That way clicking "Copy" once in Notion copies the entire prompt!
     prompt_chunks = _chunk_text_for_notion(single_job_prompt)
-    toggle_children = [
-        {
-            "object": "block",
-            "type": "code",
-            "code": {
-                "language": "markdown",
-                "rich_text": [{"type": "text", "text": {"content": chunk}}],
-            },
-        }
-        for chunk in prompt_chunks[:8]
-    ]
+    unified_code_block = {
+        "object": "block",
+        "type": "code",
+        "code": {
+            "language": "markdown",
+            "rich_text": [
+                {"type": "text", "text": {"content": chunk}}
+                for chunk in prompt_chunks[:95]
+            ],
+        },
+    }
     children.append(
         {
             "object": "block",
@@ -418,16 +420,16 @@ def write_tailoring_to_notion_page(
                 "rich_text": [
                     {
                         "type": "text",
-                        "text": {"content": "📋 Copy-Ready Gemini 4 Argon Prompt (Click to expand)"},
+                        "text": {"content": "📋 Copy-Ready Gemini 4 Argon Prompt (Click to expand, then click Copy once)"},
                     }
                 ],
-                "children": toggle_children,
+                "children": [unified_code_block],
             },
         }
     )
 
     try:
-        # Check if the Argon Resume Tailoring Kit heading was already appended to this Notion page
+        # Check if the Argon Resume Tailoring Kit was already appended to this Notion page
         existing_resp = client.get(
             f"{NOTION_BLOCKS_URL}/{page_id}/children",
             headers=headers,
@@ -437,10 +439,15 @@ def write_tailoring_to_notion_page(
             existing_blocks = (existing_resp.json() or {}).get("results") or []
             if isinstance(existing_blocks, list):
                 for blk in existing_blocks:
-                    if isinstance(blk, dict) and blk.get("type") == "heading_2":
-                        txt = _extract_notion_text(blk.get("heading_2") or {})
-                        if "Argon Resume Tailoring Kit" in txt:
+                    if isinstance(blk, dict) and blk.get("type") == "toggle":
+                        txt = _extract_notion_text(blk.get("toggle") or {})
+                        if "click Copy once" in txt:
                             return True
+                    # Clean up legacy multi-block toggle if present so we can replace it with the unified single block
+                    if isinstance(blk, dict) and blk.get("type") in ("divider", "heading_2", "callout", "toggle"):
+                        blk_id = blk.get("id")
+                        if blk_id and hasattr(client, "delete"):
+                            client.delete(f"{NOTION_BLOCKS_URL}/{blk_id}", headers=headers, timeout=15)
 
         resp = client.patch(
             f"{NOTION_BLOCKS_URL}/{page_id}/children",
