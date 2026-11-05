@@ -68,7 +68,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $TodayDate = (Get-Date).ToString("yyyy-MM-dd")
-$PromptPath = Join-Path $ProjectRoot "data\tailored\argon_tailoring_prompt_$TodayDate.md"
+$PromptPath = Join-Path $ProjectRoot "data\tailored\argon_tailoring_prompt_$TodayDate.txt"
 
 if (Test-Path $PromptPath) {
     if (-not $NoClipboard) {

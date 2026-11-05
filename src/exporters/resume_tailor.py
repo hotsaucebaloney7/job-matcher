@@ -240,8 +240,6 @@ def build_argon_tailoring_prompt(
         )
         missing_str = ", ".join(missing_groups) if missing_groups else "None flagged"
         desc = (job.get("description_text") or "").strip()
-        if len(desc) > 5500:
-            desc = desc[:5500].rstrip() + "\n... [truncated]"
 
         lines.extend(
             [
@@ -323,11 +321,12 @@ def write_tailoring_to_notion_page(
     page_id: str,
     job: Dict[str, Any],
     single_job_prompt: str,
+    prompt_file_path: Optional[Path] = None,
     tailored_output: Optional[str] = None,
     api_key: Optional[str] = None,
     http_session: Optional[requests.Session] = None,
 ) -> bool:
-    """Append an Argon Tailoring Kit (and optional AI tailored output) inside the Notion card's page body."""
+    """Append an Argon Tailoring Kit (with local .txt file path and full prompt) inside the Notion card's page body."""
     resolved_key = (api_key if api_key is not None else os.getenv("NOTION_API_KEY", "")).strip()
     if not (resolved_key and page_id):
         return False
@@ -345,6 +344,8 @@ def write_tailoring_to_notion_page(
     missing_groups: List[str] = job.get("missing_groups") or []
     matched_summary = ", ".join(matched_groups.keys()) if matched_groups else "None detected"
     missing_summary = ", ".join(missing_groups) if missing_groups else "None flagged"
+    resolved_file_str = str(prompt_file_path.resolve()) if prompt_file_path is not None else str(DEFAULT_TAILORED_DIR.resolve())
+    folder_str = str((prompt_file_path.parent if prompt_file_path is not None else DEFAULT_TAILORED_DIR).resolve())
 
     children: List[Dict[str, Any]] = [
         {"object": "block", "type": "divider", "divider": {}},
@@ -359,16 +360,33 @@ def write_tailoring_to_notion_page(
             "object": "block",
             "type": "callout",
             "callout": {
-                "icon": {"type": "emoji", "emoji": "✨"},
+                "icon": {"type": "emoji", "emoji": "📂"},
                 "color": "blue_background",
                 "rich_text": [
                     {
                         "type": "text",
                         "text": {
                             "content": (
+                                f"📄 Plain-Text Prompt File: {resolved_file_str}\n"
+                                f"📁 Tailored Folder: {folder_str}\n"
                                 f"✅ Matched Skills: {matched_summary}\n"
                                 f"🎯 Missing ATS Keywords to Weave In: {missing_summary}"
                             )[:1950]
+                        },
+                    }
+                ],
+            },
+        },
+        {
+            "object": "block",
+            "type": "code",
+            "code": {
+                "language": "powershell",
+                "rich_text": [
+                    {
+                        "type": "text",
+                        "text": {
+                            "content": f'Get-Content -LiteralPath "{resolved_file_str}" -Raw -Encoding UTF8 | Set-Clipboard'
                         },
                     }
                 ],
@@ -397,15 +415,13 @@ def write_tailoring_to_notion_page(
                 }
             )
 
-    # Embed the entire copy-ready Argon prompt inside a SINGLE code block by passing multiple
-    # <=1900-char rich_text objects in the same `rich_text` array (Notion allows up to 100 per block).
-    # That way clicking "Copy" once in Notion copies the entire prompt!
+    # Embed the full untruncated Argon prompt inside a SINGLE code block
     prompt_chunks = _chunk_text_for_notion(single_job_prompt)
     unified_code_block = {
         "object": "block",
         "type": "code",
         "code": {
-            "language": "markdown",
+            "language": "plain text",
             "rich_text": [
                 {"type": "text", "text": {"content": chunk}}
                 for chunk in prompt_chunks[:95]
@@ -420,7 +436,7 @@ def write_tailoring_to_notion_page(
                 "rich_text": [
                     {
                         "type": "text",
-                        "text": {"content": "📋 Copy-Ready Gemini 4 Argon Prompt (Click to expand, then click Copy once)"},
+                        "text": {"content": "📋 Full Untruncated Gemini 4 Argon Prompt (Click to expand, then click Copy once)"},
                     }
                 ],
                 "children": [unified_code_block],
@@ -429,7 +445,6 @@ def write_tailoring_to_notion_page(
     )
 
     try:
-        # Check if the Argon Resume Tailoring Kit was already appended to this Notion page
         existing_resp = client.get(
             f"{NOTION_BLOCKS_URL}/{page_id}/children",
             headers=headers,
@@ -441,10 +456,10 @@ def write_tailoring_to_notion_page(
                 for blk in existing_blocks:
                     if isinstance(blk, dict) and blk.get("type") == "toggle":
                         txt = _extract_notion_text(blk.get("toggle") or {})
-                        if "click Copy once" in txt:
+                        if "Full Untruncated Gemini 4 Argon Prompt" in txt:
                             return True
-                    # Clean up legacy multi-block toggle if present so we can replace it with the unified single block
-                    if isinstance(blk, dict) and blk.get("type") in ("divider", "heading_2", "callout", "toggle"):
+                    # Clean up previous blocks so we replace cleanly with the untruncated version + file path
+                    if isinstance(blk, dict) and blk.get("type") in ("divider", "heading_2", "callout", "code", "toggle"):
                         blk_id = blk.get("id")
                         if blk_id and hasattr(client, "delete"):
                             client.delete(f"{NOTION_BLOCKS_URL}/{blk_id}", headers=headers, timeout=15)
@@ -493,7 +508,7 @@ def process_want_to_apply_queue(
 
     output_dir.mkdir(parents=True, exist_ok=True)
     today_str = date.today().isoformat()
-    batch_prompt_path = output_dir / f"argon_tailoring_prompt_{today_str}.md"
+    batch_prompt_path = output_dir / f"argon_tailoring_prompt_{today_str}.txt"
 
     if not jobs:
         return {
@@ -521,7 +536,7 @@ def process_want_to_apply_queue(
             resume_filename=resolved_resume_path.name,
         )
         slug = f"{_slugify(job['company'])}_{_slugify(job['title'])}"
-        job_prompt_file = output_dir / f"{today_str}_{slug}_Argon_Prompt.md"
+        job_prompt_file = output_dir / f"{today_str}_{slug}_Argon_Prompt.txt"
         job_prompt_file.write_text(single_prompt, encoding="utf-8")
         tailored_files.append(job_prompt_file)
 
@@ -531,15 +546,16 @@ def process_want_to_apply_queue(
             http_session=http_session,
         )
         if ai_output:
-            tailored_md = output_dir / f"{today_str}_{slug}_Tailored_Resume.md"
-            tailored_md.write_text(ai_output, encoding="utf-8")
-            tailored_files.append(tailored_md)
+            tailored_txt = output_dir / f"{today_str}_{slug}_Tailored_Resume.txt"
+            tailored_txt.write_text(ai_output, encoding="utf-8")
+            tailored_files.append(tailored_txt)
 
         if update_notion_pages and job.get("notion_page_id"):
             ok = write_tailoring_to_notion_page(
                 page_id=job["notion_page_id"],
                 job=job,
                 single_job_prompt=single_prompt,
+                prompt_file_path=job_prompt_file,
                 tailored_output=ai_output,
                 api_key=api_key,
                 http_session=http_session,
