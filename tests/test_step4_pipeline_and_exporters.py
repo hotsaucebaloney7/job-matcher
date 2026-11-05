@@ -599,9 +599,29 @@ class TestAshbyAndExternalAggregatorClients:
                 http_session=mock_http,
             )
             assert res["jobs_found"] == 1
+            assert res["pending_jobs"] == 1
             assert res["notion_pages_updated"] == 1
             assert res["prompt_path"] is not None and res["prompt_path"].exists()
             assert len(res["tailored_files"]) == 1
+
+            # Simulate an already-created tailored .docx resume in data/tailored/
+            existing_docx = out_dir / "Josh_Engelhardt_Resume_Mistral_AI_Applied_AI_Engineer.docx"
+            existing_docx.write_bytes(b"fake-docx-content")
+
+            res_skip = process_want_to_apply_queue(
+                session=session,
+                resume_path=fake_resume,
+                output_dir=out_dir,
+                api_key="secret_test",
+                database_id="40c3be74ca2c80a99786e33cd4b0ee89",
+                gemini_api_key="",
+                update_notion_pages=True,
+                http_session=mock_http,
+            )
+            assert res_skip["jobs_found"] == 1
+            assert res_skip["pending_jobs"] == 0
+            assert len(res_skip["skipped_existing"]) == 1
+            assert res_skip["skipped_existing"][0]["existing_resume_file"] == existing_docx
 
 
 

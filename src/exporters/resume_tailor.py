@@ -548,6 +548,42 @@ def _slugify(value: str) -> str:
     return cleaned.strip("_")[:40] or "Job"
 
 
+def find_existing_tailored_resume(
+    company: str,
+    title: str,
+    output_dir: Path = DEFAULT_TAILORED_DIR,
+) -> Optional[Path]:
+    """Return an existing tailored resume file (.docx, .pdf, .md) in `data/tailored/` if one was already generated."""
+    if not output_dir.exists():
+        return None
+
+    company_slug = _slugify(company).lower()
+    full_slug = f"{company_slug}_{_slugify(title).lower()}"
+
+    candidates: List[Path] = []
+    for p in output_dir.iterdir():
+        if not p.is_file():
+            continue
+        name_low = p.name.lower()
+        # Ignore raw Argon prompt input files
+        if "argon_prompt" in name_low or "tailoring_prompt" in name_low:
+            continue
+        if p.suffix.lower() not in {".docx", ".pdf", ".md", ".txt"}:
+            continue
+        if full_slug in name_low or (
+            company_slug
+            and len(company_slug) >= 3
+            and company_slug in name_low
+            and ("resume" in name_low or "tailored" in name_low)
+        ):
+            candidates.append(p)
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+    return candidates[0]
+
+
 def process_want_to_apply_queue(
     session: Session,
     resume_path: Optional[Path] = None,
@@ -556,10 +592,11 @@ def process_want_to_apply_queue(
     database_id: Optional[str] = None,
     gemini_api_key: Optional[str] = None,
     update_notion_pages: bool = True,
+    force_regenerate: bool = False,
     console: Optional[Console] = None,
     http_session: Optional[requests.Session] = None,
 ) -> Dict[str, Any]:
-    """End-to-end processor for all Notion cards with `Status = "Want to Apply"`."""
+    """End-to-end processor for all Notion cards with `Status = "Want to Apply"`, skipping already-tailored jobs."""
     resume_text, resolved_resume_path = load_resume_text(explicit_path=resume_path)
     jobs = fetch_want_to_apply_jobs(
         session=session,
@@ -575,23 +612,51 @@ def process_want_to_apply_queue(
     if not jobs:
         return {
             "jobs_found": 0,
+            "pending_jobs": 0,
+            "skipped_existing": [],
             "prompt_path": None,
             "tailored_files": [],
             "notion_pages_updated": 0,
             "resume_path": resolved_resume_path,
         }
 
-    batch_prompt = build_argon_tailoring_prompt(
-        jobs=jobs,
-        resume_text=resume_text,
-        resume_filename=resolved_resume_path.name,
-    )
-    batch_prompt_path.write_text(batch_prompt, encoding="utf-8")
+    pending_jobs: List[Dict[str, Any]] = []
+    skipped_existing: List[Dict[str, Any]] = []
+
+    for job in jobs:
+        existing_file = (
+            None
+            if force_regenerate
+            else find_existing_tailored_resume(job["company"], job["title"], output_dir=output_dir)
+        )
+        if existing_file is not None:
+            job["existing_resume_file"] = existing_file
+            skipped_existing.append(job)
+        else:
+            pending_jobs.append(job)
+
+    if console and skipped_existing:
+        for sjob in skipped_existing:
+            console.print(
+                f"[dim cyan]⏭️  Skipping already-tailored job:[/dim cyan] "
+                f"[bold]{sjob['company']} — {sjob['title']}[/bold] "
+                f"(Found: [green]{sjob['existing_resume_file'].name}[/green])"
+            )
+
+    if pending_jobs:
+        batch_prompt = build_argon_tailoring_prompt(
+            jobs=pending_jobs,
+            resume_text=resume_text,
+            resume_filename=resolved_resume_path.name,
+        )
+        batch_prompt_path.write_text(batch_prompt, encoding="utf-8")
+    else:
+        batch_prompt_path = None
 
     tailored_files: List[Path] = []
     notion_updated = 0
 
-    for job in jobs:
+    for job in pending_jobs:
         single_prompt = build_argon_tailoring_prompt(
             jobs=[job],
             resume_text=resume_text,
@@ -627,12 +692,15 @@ def process_want_to_apply_queue(
 
     if console:
         console.print(
-            f"[bold green]Tailoring Queue Processed:[/bold green] {len(jobs)} 'Want to Apply' job(s) "
-            f"-> [underline]{batch_prompt_path}[/underline] (Notion cards updated: {notion_updated})"
+            f"[bold green]Tailoring Queue Summary:[/bold green] "
+            f"{len(pending_jobs)} new to tailor, {len(skipped_existing)} already tailored (skipped) "
+            f"(Notion cards updated: {notion_updated})"
         )
 
     return {
         "jobs_found": len(jobs),
+        "pending_jobs": len(pending_jobs),
+        "skipped_existing": skipped_existing,
         "prompt_path": batch_prompt_path,
         "tailored_files": tailored_files,
         "notion_pages_updated": notion_updated,
@@ -655,6 +723,10 @@ def main() -> None:
         console.print(
             "[yellow]No cards currently have Status = 'Want to Apply' on your Notion board.[/yellow]\n"
             "Tip: Change any job's Status to [bold]Want to Apply[/bold] in Notion, then re-run!"
+        )
+    elif result["pending_jobs"] == 0:
+        console.print(
+            "[bold green]All 'Want to Apply' jobs already have tailored resumes in data/tailored/![/bold green]"
         )
     else:
         console.print(
