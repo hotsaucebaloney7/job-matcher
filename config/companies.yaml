@@ -23,14 +23,14 @@ greenhouse:
 lever:
   - slug: palantir
     name: Palantir
-  - slug: mistral
-    name: Mistral AI
   - slug: zoox
     name: Zoox
 
 ashby:
   - slug: openai
     name: OpenAI
+  - slug: mistral.ai
+    name: Mistral AI
   - slug: langchain
     name: LangChain
   - slug: cohere
