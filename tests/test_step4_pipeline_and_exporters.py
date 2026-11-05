@@ -14,6 +14,11 @@ from src.exporters.markdown_digest import (
     get_high_scoring_new_postings,
 )
 from src.exporters.notion_sync import archive_expired_notion_pages, sync_to_notion
+from src.exporters.resume_tailor import (
+    build_argon_tailoring_prompt,
+    fetch_want_to_apply_jobs,
+    process_want_to_apply_queue,
+)
 from src.ingest.adzuna_client import poll_adzuna
 from src.ingest.ats_poller import fetch_ashby_board
 from src.ingest.external_apis import poll_jsearch_rapidapi, poll_remotive, poll_the_muse, poll_usajobs
@@ -493,5 +498,110 @@ class TestAshbyAndExternalAggregatorClients:
             assert row_unapplied.matched_keywords.get("notion_archived") is True
             assert row_applied.status == "applied"
             assert row_applied.matched_keywords.get("notion_preserved") is True
+
+    def test_want_to_apply_queue_processor_and_argon_prompt_builder(self, tmp_path: Path) -> None:
+        engine = get_engine("sqlite+pysqlite:///:memory:")
+        init_db(engine)
+        SessionLocal = get_session_factory(engine)
+
+        job_hash = compute_job_hash("Mistral AI", "Applied AI Engineer", "Remote")
+        with SessionLocal() as session:
+            upsert_job_postings(
+                session,
+                [
+                    {
+                        "job_hash": job_hash,
+                        "source": "ashby",
+                        "external_id": "mistral-1",
+                        "company": "Mistral AI",
+                        "title": "Applied AI Engineer",
+                        "location_raw": "Remote - US",
+                        "workplace_type": "Remote",
+                        "url": "https://jobs.ashbyhq.com/mistral.ai/mistral-1",
+                        "description_text": "Build production RAG, fine-tuning, and agentic workflows in Python and PyTorch.",
+                    }
+                ],
+            )
+            row = session.get(JobPosting, job_hash)
+            assert row is not None
+            row.notion_page_id = "page-want-to-apply-1"
+            row.match_score = 88.5
+            row.keyword_score = 92.0
+            row.semantic_score = 85.0
+            row.matched_keywords = {
+                "experience_tier": "1-3 yrs (Target)",
+                "matched_groups": {"Python": ["python"], "GenAI_LLM": ["rag", "agentic"]},
+                "missing_groups": ["Cloud_AWS", "Docker_K8s"],
+            }
+            session.commit()
+
+            mock_http = MagicMock()
+            # Mock _ensure_database_schema GET and /databases/{id}/query POST
+            mock_db_get = MagicMock()
+            mock_db_get.status_code = 200
+            mock_db_get.json.return_value = {"properties": {"Name": {"type": "title"}}}
+            mock_http.get.return_value = mock_db_get
+
+            mock_query_post = MagicMock()
+            mock_query_post.status_code = 200
+            mock_query_post.json.return_value = {
+                "results": [
+                    {
+                        "id": "page-want-to-apply-1",
+                        "archived": False,
+                        "properties": {
+                            "Name": {"type": "title", "title": [{"plain_text": "Mistral AI — Applied AI Engineer"}]},
+                            "Company": {"type": "rich_text", "rich_text": [{"plain_text": "Mistral AI"}]},
+                            "URL": {"url": "https://jobs.ashbyhq.com/mistral.ai/mistral-1"},
+                            "Match Score": {"number": 88.5},
+                            "Workplace": {"select": {"name": "Remote"}},
+                        },
+                    }
+                ]
+            }
+            mock_http.post.return_value = mock_query_post
+            mock_patch = MagicMock()
+            mock_patch.status_code = 200
+            mock_http.patch.return_value = mock_patch
+
+            jobs = fetch_want_to_apply_jobs(
+                session=session,
+                api_key="secret_test",
+                database_id="40c3be74ca2c80a99786e33cd4b0ee89",
+                http_session=mock_http,
+            )
+            assert len(jobs) == 1
+            assert jobs[0]["company"] == "Mistral AI"
+            assert "GenAI_LLM" in jobs[0]["matched_groups"]
+            assert "Cloud_AWS" in jobs[0]["missing_groups"]
+
+            prompt = build_argon_tailoring_prompt(
+                jobs=jobs,
+                resume_text="Josh Engelhardt — Data Scientist & AI Engineer skilled in Python, SQL, PyTorch, RAG.",
+                resume_filename="Josh_Engelhardt_Resume-v3.docx",
+            )
+            assert "Mistral AI — Applied AI Engineer" in prompt
+            assert "Cloud_AWS, Docker_K8s" in prompt
+            assert "Josh_Engelhardt_Resume-v3.docx" in prompt
+
+            fake_resume = tmp_path / "test_resume.txt"
+            fake_resume.write_text("Josh Engelhardt — Python & PyTorch AI Engineer", encoding="utf-8")
+            out_dir = tmp_path / "tailored"
+
+            res = process_want_to_apply_queue(
+                session=session,
+                resume_path=fake_resume,
+                output_dir=out_dir,
+                api_key="secret_test",
+                database_id="40c3be74ca2c80a99786e33cd4b0ee89",
+                gemini_api_key="",
+                update_notion_pages=True,
+                http_session=mock_http,
+            )
+            assert res["jobs_found"] == 1
+            assert res["notion_pages_updated"] == 1
+            assert res["prompt_path"] is not None and res["prompt_path"].exists()
+            assert len(res["tailored_files"]) == 1
+
 
 

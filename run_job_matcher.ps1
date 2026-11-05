@@ -34,6 +34,7 @@ param (
     [switch]$RunTests,
     [switch]$InstallDeps,
     [switch]$NoOpenReport,
+    [switch]$TailorResumes,
     [string]$ResumePath = ""
 )
 
@@ -156,4 +157,11 @@ $ReportPath = Join-Path $ProjectRoot "reports\daily_matches_$TodayDate.md"
 if ((Test-Path $ReportPath) -and (-not $NoOpenReport)) {
     Write-Host "`nOpening daily report: $ReportPath" -ForegroundColor Green
     Invoke-Item $ReportPath
+}
+
+if ($TailorResumes) {
+    $TailorScript = Join-Path $ProjectRoot "tailor_resumes.ps1"
+    if (Test-Path $TailorScript) {
+        & $TailorScript
+    }
 }

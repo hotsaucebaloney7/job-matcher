@@ -54,6 +54,7 @@ data/*.pdf
 data/*.docx
 data/*.doc
 data/.last_resume_hash
+data/tailored/
 
 # OS metadata
 Thumbs.db
