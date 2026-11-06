@@ -35,6 +35,7 @@ ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
 
 DEFAULT_TAILORED_DIR = DEFAULT_DATA_DIR / "tailored"
+TAILORED_RESUME_FILENAME = "EngelhardtJoshuaResume.docx"
 NOTION_BLOCKS_URL = "https://api.notion.com/v1/blocks"
 NOTION_FILE_UPLOADS_URL = "https://api.notion.com/v1/file_uploads"
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -201,10 +202,11 @@ def build_argon_tailoring_prompt(
         "Below is my current master resume followed by the target job posting(s) from my Notion **`Want to Apply`** queue.",
         "",
         "## 🛠️ Tailoring Instructions for Each Job",
+        "**CRITICAL RULE:** Use **ONLY** skills, tools, and methods that already appear on my Master Resume when writing the Summary, Technical Skills, and Bullet Rewrites. Do **NOT** insert any new/missing skills into the resume sections unless I explicitly confirm I have done them.",
         "For **each** target job below, provide:",
-        "1. **Tailored Professional Summary (3–4 lines):** Mirror the exact role title, domain focus, and top matched/missing ATS keywords while staying 100% truthful to my background.",
-        "2. **High-Impact Experience & Project Bullet Rewrites (4–6 bullets):** Select the strongest bullets from my master resume and rewrite them using the `Action Verb + Technical Method/Tool + Quantified Impact` formula to align with the job's core responsibilities.",
-        "3. **ATS Skills & Keywords Alignment:** Explicitly list which **Missing Skill Groups** can be naturally woven into my Technical Skills section or project descriptions based on my adjacent experience (never fabricate degrees, employers, or years of experience).",
+        "1. **Tailored Professional Summary (3–4 lines):** Mirror the role focus using **only** skills and experience already on my master resume.",
+        "2. **High-Impact Experience & Project Bullet Rewrites (4–6 bullets):** Select the strongest bullets from my master resume and rewrite them using `Action Verb + Technical Method/Tool + Quantified Impact` with **only** the tools I actually used on my master resume.",
+        "3. **❓ Candidate Skill Check — Have You Done Any of These? (Single Consolidated List):** In **one single place**, list all missing skills/tools from the job description that are NOT on my master resume so I can review them and tell you whether I have done any of them before they are ever added.",
         "4. **3-Sentence Cover Letter / Cold Outreach Hook:** A concise, high-signal opening paragraph I can paste into the application portal or send to the hiring manager.",
         "",
         "---",
@@ -557,12 +559,22 @@ def _meaningful_tokens(text: str) -> List[str]:
     return [t for t in raw if t not in _STOP_WORDS and len(t) >= 2]
 
 
+def get_position_folder(
+    company: str,
+    title: str,
+    output_dir: Path = DEFAULT_TAILORED_DIR,
+) -> Path:
+    """Return the canonical position subfolder path: `data/tailored/<Company_Slug>_<Title_Slug>/`."""
+    folder_slug = f"{_slugify(company)}_{_slugify(title)}"
+    return output_dir / folder_slug
+
+
 def find_existing_tailored_resume(
     company: str,
     title: str,
     output_dir: Path = DEFAULT_TAILORED_DIR,
 ) -> Optional[Path]:
-    """Return an existing tailored resume file (.docx, .pdf) in `data/tailored/` if one was already generated."""
+    """Return an existing tailored resume file (`EngelhardtJoshuaResume.docx`) inside a position subfolder (or legacy flat file)."""
     if not output_dir.exists():
         return None
 
@@ -577,24 +589,48 @@ def find_existing_tailored_resume(
         if t not in {"senior", "jr", "junior", "ii", "iii", "iv", "staff", "lead"}
     ]
 
+    # 1. Exact canonical position folder check: data/tailored/<Company_Slug>_<Title_Slug>/EngelhardtJoshuaResume.docx
+    canonical_dir = get_position_folder(company, title, output_dir=output_dir)
+    canonical_file = canonical_dir / TAILORED_RESUME_FILENAME
+    if canonical_file.exists():
+        return canonical_file
+
     best_match: Optional[Path] = None
     best_score = 0
 
-    for p in output_dir.iterdir():
-        if not p.is_file():
-            continue
-        name_low = p.name.lower()
-        # Ignore raw Argon prompt input files
-        if "argon_prompt" in name_low or "tailoring_prompt" in name_low:
-            continue
-        if p.suffix.lower() not in {".docx", ".pdf", ".md", ".txt"}:
+    for entry in output_dir.iterdir():
+        # Check position subfolders first (e.g. data/tailored/<Position_Folder>/EngelhardtJoshuaResume.docx)
+        if entry.is_dir():
+            resume_candidates = [
+                f for f in entry.iterdir()
+                if f.is_file()
+                and f.suffix.lower() in {".docx", ".pdf"}
+                and "argon_prompt" not in f.name.lower()
+            ]
+            if not resume_candidates:
+                continue
+            target_file = next(
+                (f for f in resume_candidates if f.name.lower() == TAILORED_RESUME_FILENAME.lower()),
+                resume_candidates[0],
+            )
+            name_low = entry.name.lower()
+            stem_for_tokens = entry.name
+        elif entry.is_file():
+            name_low = entry.name.lower()
+            if "argon_prompt" in name_low or "tailoring_prompt" in name_low:
+                continue
+            if entry.suffix.lower() not in {".docx", ".pdf", ".md", ".txt"}:
+                continue
+            target_file = entry
+            stem_for_tokens = entry.stem
+        else:
             continue
 
         # Exact full slug match
         if full_slug and full_slug in name_low:
-            return p
+            return target_file
 
-        # Check if primary company token is in the filename
+        # Check if primary company token is in the folder/file name
         has_company = (
             (company_slug and len(company_slug) >= 3 and company_slug in name_low)
             or (primary_company_token and len(primary_company_token) >= 3 and primary_company_token in name_low)
@@ -602,20 +638,32 @@ def find_existing_tailored_resume(
         if not has_company:
             continue
 
-        # Count how many distinctive title tokens appear in the filename
-        file_tokens = set(_meaningful_tokens(p.stem))
-        overlap = sum(1 for t in title_tokens if t in file_tokens or t in name_low)
-        # Distinguish e.g. "Reddit Ads Integrity" (2 overlap) vs "Reddit Ads" (1 overlap: 'ads', not 'integrity')
-        non_matching_file_tokens = file_tokens - set(company_tokens) - {"josh", "engelhardt", "resume", "tailored", "ds", "ml", "ai"}
-        extra_penalty = len(non_matching_file_tokens - set(title_tokens))
+        # Count how many distinctive title tokens appear in the folder/file name
+        entry_tokens = set(_meaningful_tokens(stem_for_tokens))
+        overlap = sum(1 for t in title_tokens if t in entry_tokens or t in name_low)
+        non_matching_tokens = entry_tokens - set(company_tokens) - {
+            "josh",
+            "engelhardt",
+            "engelhardtjoshuaresume",
+            "resume",
+            "tailored",
+            "ds",
+            "ml",
+            "ai",
+        }
+        extra_penalty = len(non_matching_tokens - set(title_tokens))
 
         score = overlap * 10 - extra_penalty
         if overlap >= 1 and score > best_score:
             best_score = score
-            best_match = p
-        elif best_match is None and ("resume" in name_low or "tailored" in name_low) and len(company_tokens) == 1 and company_tokens[0] != "reddit":
-            # Single-job company match (e.g. Ampcus -> Josh_Engelhardt_Resume_Ampcus_Applied_AI.docx)
-            best_match = p
+            best_match = target_file
+        elif (
+            best_match is None
+            and (entry.is_dir() or "resume" in name_low or "tailored" in name_low)
+            and len(company_tokens) == 1
+            and company_tokens[0] != "reddit"
+        ):
+            best_match = target_file
 
     return best_match
 
@@ -673,10 +721,15 @@ def process_want_to_apply_queue(
 
     if console and skipped_existing:
         for sjob in skipped_existing:
+            existing_path: Path = sjob["existing_resume_file"]
+            try:
+                rel_display = str(existing_path.relative_to(output_dir))
+            except ValueError:
+                rel_display = existing_path.name
             console.print(
                 f"[dim cyan][SKIP] Already tailored:[/dim cyan] "
                 f"[bold]{sjob['company']} - {sjob['title']}[/bold] "
-                f"(Found: [green]{sjob['existing_resume_file'].name}[/green])"
+                f"(Found: [green]{rel_display}[/green])"
             )
 
     if pending_jobs:
@@ -698,7 +751,9 @@ def process_want_to_apply_queue(
             resume_text=resume_text,
             resume_filename=resolved_resume_path.name,
         )
-        slug = f"{_slugify(job['company'])}_{_slugify(job['title'])}"
+        pos_dir = get_position_folder(job["company"], job["title"], output_dir=output_dir)
+        pos_dir.mkdir(parents=True, exist_ok=True)
+        slug = pos_dir.name
         job_prompt_file = output_dir / f"{today_str}_{slug}_Argon_Prompt.txt"
         job_prompt_file.write_text(single_prompt, encoding="utf-8")
         tailored_files.append(job_prompt_file)
