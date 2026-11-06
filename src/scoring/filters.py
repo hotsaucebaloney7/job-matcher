@@ -13,7 +13,7 @@ WorkplaceType = Literal["Remote", "Local", "Hybrid"]
 
 # 1. Excluded seniority / management / intern prefixes & tokens (word-boundary matched)
 EXCLUDED_TITLE_PATTERN = re.compile(
-    r"\b(?:staff|principal|director|vp|vice\s+president|head\s+of|intern|internship|lead|manager)\b",
+    r"\b(?:staff|principal|director|vp|vice\s+president|head\s+of|chief|supervisory|intern|internship|lead|manager)\b",
     re.IGNORECASE,
 )
 
@@ -28,6 +28,23 @@ TARGET_TITLE_PATTERN = re.compile(
 # 3. Mode 2: Local <= 25 Min Commute (~15-mile radius around Raleigh / RTP, NC)
 LOCAL_RTP_PATTERN = re.compile(
     r"\b(?:raleigh|cary|morrisville|rtp|research\s+triangle|garner|apex|durham|wake)\b",
+    re.IGNORECASE,
+)
+
+# 3b. USAJOBS-Specific Region: Washington, DC, Fort Meade, MD, and surrounding DMV / Baltimore-Washington corridor
+USAJOBS_DC_FORT_MEADE_PATTERN = re.compile(
+    r"(?:"
+    r"\bwashington\s*,?\s*(?:dc|d\.c\.|district\s+of\s+columbia)\b|"
+    r"\bdistrict\s+of\s+columbia\b|"
+    r"\b(?:fort|ft\.?)\s+george\s+g\.?\s+meade\b|"
+    r"\b(?:fort|ft\.?)\s+meade\b|"
+    r"\b(?:annapolis\s+junction|odenton|laurel|columbia|linthicum|hanover|elkridge|"
+    r"baltimore|silver\s+spring|bethesda|rockville|greenbelt|suitland|college\s+park|"
+    r"new\s+carrollton|lanham|bowie|hyattsville|adele|adelphi|andrews\s+afb|joint\s+base\s+andrews|"
+    r"fort\s+detrick|aberdeen\s+proving\s+ground|apg|patuxent\s+river|indian\s+head)\b|"
+    r"\b(?:arlington|alexandria|mclean|tysons|reston|herndon|chantilly|fairfax|"
+    r"falls\s+church|springfield|fort\s+belvoir|quantico|dahlgren|pentagon)\b"
+    r")",
     re.IGNORECASE,
 )
 
@@ -194,8 +211,11 @@ def is_target_title(title: str) -> bool:
     return bool(TARGET_TITLE_PATTERN.search(title))
 
 
-def classify_location(location_raw: Optional[str]) -> Optional[WorkplaceType]:
-    """Evaluate location against Local (Raleigh/RTP <=25 min) and US-Remote rules.
+def classify_location(
+    location_raw: Optional[str],
+    allow_dc_fort_meade: bool = False,
+) -> Optional[WorkplaceType]:
+    """Evaluate location against Local (Raleigh/RTP <=25 min, plus DC/Fort Meade when allow_dc_fort_meade=True) and US-Remote rules.
 
     Returns:
         'Local', 'Hybrid', or 'Remote' if the location passes the filter;
@@ -206,8 +226,10 @@ def classify_location(location_raw: Optional[str]) -> Optional[WorkplaceType]:
 
     loc = location_raw.strip()
 
-    # Check Mode 2 first: Local Raleigh/RTP commute radius
-    if LOCAL_RTP_PATTERN.search(loc):
+    # Check Mode 2 first: Local Raleigh/RTP commute radius (or USAJOBS DC / Fort Meade corridor)
+    if LOCAL_RTP_PATTERN.search(loc) or (
+        allow_dc_fort_meade and USAJOBS_DC_FORT_MEADE_PATTERN.search(loc)
+    ):
         if HYBRID_PATTERN.search(loc):
             return "Hybrid"
         return "Local"
@@ -245,6 +267,7 @@ def evaluate_posting(
     location_raw: Optional[str],
     description_text: Optional[str] = None,
     max_experience_years: int = DEFAULT_MAX_EXPERIENCE_YEARS,
+    allow_dc_fort_meade: bool = False,
 ) -> Tuple[bool, Optional[WorkplaceType], Optional[str], str]:
     """Run all Step 3.1 Hard Knockout Filters (including max years of experience) on a job posting.
 
@@ -257,7 +280,7 @@ def evaluate_posting(
     if not is_target_title(title):
         return False, None, None, "Title outside target role families"
 
-    workplace_type = classify_location(location_raw)
+    workplace_type = classify_location(location_raw, allow_dc_fort_meade=allow_dc_fort_meade)
     if workplace_type is None:
         return False, None, None, f"Location rejected ({location_raw!r})"
 

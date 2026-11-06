@@ -478,6 +478,26 @@ def poll_usajobs(
             "is_remote_query": False,
         },
         {
+            "label": "Washington DC / DMV (25 mi)",
+            "params": {
+                "LocationName": "Washington, District of Columbia",
+                "Radius": "25",
+                "JobCategoryCode": "1560;1550;1515;1529;1530;2210;0854",
+                "ResultsPerPage": "100",
+            },
+            "is_remote_query": False,
+        },
+        {
+            "label": "Fort Meade / MD Corridor (25 mi)",
+            "params": {
+                "LocationName": "Fort George G. Meade, Maryland",
+                "Radius": "25",
+                "JobCategoryCode": "1560;1550;1515;1529;1530;2210;0854",
+                "ResultsPerPage": "100",
+            },
+            "is_remote_query": False,
+        },
+        {
             "label": "Federal Data Scientist (1560)",
             "params": {
                 "Keyword": "Data Scientist",
@@ -525,11 +545,45 @@ def poll_usajobs(
                         for loc in (desc.get("PositionLocation") or [])
                         if isinstance(loc, dict) and loc.get("LocationName")
                     ]
-                    # Keep any North Carolina / Triangle duty stations plus first 3 locations so Multi-Location jobs match RTP
-                    nc_locs = [
-                        l for l in pos_locs if any(k in l.lower() for k in ("north carolina", ", nc", "raleigh", "durham", "cary", "morrisville"))
+                    # Keep any North Carolina / Triangle or DC / Fort Meade / MD / VA duty stations plus first 3 locations
+                    priority_locs = [
+                        l
+                        for l in pos_locs
+                        if any(
+                            k in l.lower()
+                            for k in (
+                                "north carolina",
+                                ", nc",
+                                "raleigh",
+                                "durham",
+                                "cary",
+                                "morrisville",
+                                "district of columbia",
+                                "washington",
+                                "meade",
+                                "maryland",
+                                ", md",
+                                "virginia",
+                                ", va",
+                                "annapolis junction",
+                                "laurel",
+                                "columbia",
+                                "baltimore",
+                                "arlington",
+                                "alexandria",
+                                "mclean",
+                                "reston",
+                                "chantilly",
+                                "fort belvoir",
+                                "bethesda",
+                                "silver spring",
+                                "suitland",
+                                "greenbelt",
+                                "adelphi",
+                            )
+                        )
                     ]
-                    selected_locs = list(dict.fromkeys(nc_locs + pos_locs[:3]))
+                    selected_locs = list(dict.fromkeys(priority_locs + pos_locs[:3]))
                     loc_parts = [p for p in [loc_display, ", ".join(selected_locs)] if p]
                     if q["is_remote_query"] or "anywhere in the u.s." in loc_display.lower():
                         loc_parts.insert(0, "Remote - United States")
@@ -550,9 +604,17 @@ def poll_usajobs(
                         title=title,
                         location_raw=location_raw,
                         description_text=description_text,
+                        allow_dc_fort_meade=True,
                     )
                     if not passed:
                         continue
+
+                    display_loc = loc_display
+                    if (
+                        "location negotiable" in loc_display.lower()
+                        or "multiple locations" in loc_display.lower()
+                    ) and priority_locs:
+                        display_loc = f"{loc_display} ({', '.join(priority_locs[:2])})"
 
                     salary_min: Optional[int] = None
                     salary_max: Optional[int] = None
@@ -580,7 +642,7 @@ def poll_usajobs(
                             "external_id": str(item.get("MatchedObjectId") or ""),
                             "company": company,
                             "title": title,
-                            "location_raw": loc_display or location_raw,
+                            "location_raw": display_loc or location_raw,
                             "workplace_type": workplace_type,
                             "salary_min": salary_min,
                             "salary_max": salary_max,

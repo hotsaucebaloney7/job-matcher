@@ -367,7 +367,7 @@ class TestAshbyAndExternalAggregatorClients:
         assert js_jobs[0]["url"] == "https://careers.rtpbioai.com/jobs/js-1"
         assert js_jobs[0]["salary_min"] == 135000
 
-        # 4. USAJOBS mock
+        # 4. USAJOBS mock (Raleigh/RTP + Washington DC / Fort Meade corridor)
         usa_resp = MagicMock()
         usa_resp.json.return_value = {
             "SearchResult": {
@@ -387,17 +387,35 @@ class TestAshbyAndExternalAggregatorClients:
                             "QualificationSummary": "1-3 years experience with Python, SQL, and statistical modeling.",
                             "UserArea": {"Details": {"JobSummary": "EPA RTP Data Scientist role."}},
                         },
-                    }
+                    },
+                    {
+                        "MatchedObjectId": "usa-102",
+                        "MatchedObjectDescriptor": {
+                            "PositionTitle": "Operations Research Analyst",
+                            "OrganizationName": "U.S. Cyber Command",
+                            "PositionLocationDisplay": "Fort George G. Meade, Maryland",
+                            "PositionLocation": [{"LocationName": "Fort George G. Meade, Maryland"}],
+                            "PositionURI": "https://www.usajobs.gov/job/usa-102",
+                            "PublicationStartDate": "2026-11-01T00:00:00Z",
+                            "PositionRemuneration": [
+                                {"MinimumRange": "112000", "MaximumRange": "145000", "RateIntervalCode": "PA"}
+                            ],
+                            "QualificationSummary": "2+ years experience with Python and machine learning.",
+                            "UserArea": {"Details": {"JobSummary": "Fort Meade quantitative analyst role."}},
+                        },
+                    },
                 ]
             }
         }
         mock_session.get.return_value = usa_resp
         usa_jobs, _ = poll_usajobs(api_key="test_usa_key", session=mock_session)
-        assert len(usa_jobs) == 1
+        assert len(usa_jobs) == 2
         assert usa_jobs[0]["source"] == "usajobs"
         assert usa_jobs[0]["workplace_type"] == "Local"
         assert usa_jobs[0]["salary_min"] == 95000
         assert usa_jobs[0]["salary_max"] == 128000
+        assert usa_jobs[1]["company"] == "U.S. Cyber Command"
+        assert usa_jobs[1]["location_raw"] == "Fort George G. Meade, Maryland"
 
     def test_expire_stale_postings_and_archive_unapplied_notion_pages(self) -> None:
         engine = get_engine("sqlite+pysqlite:///:memory:")
