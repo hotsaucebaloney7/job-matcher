@@ -1,20 +1,25 @@
-# Target company ATS board slugs for daily polling
+# Target company ATS board slugs & public Workday CXS feeds for daily polling
+# Track 1 Focus: Federal, Defense Contracting, FFRDC, and Dual-Use AI/Data Engineering
 # Greenhouse endpoint: https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true
 # Lever endpoint:      https://api.lever.co/v0/postings/{slug}?mode=json
+# Ashby endpoint:      https://api.ashbyhq.com/posting-api/job-board/{slug}
+# Workday CXS JSON:    https://{tenant}.{wd}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs
 
 greenhouse:
-  - slug: anthropic
-    name: Anthropic
+  - slug: andurilindustries
+    name: Anduril Industries
   - slug: scaleai
     name: Scale AI
+  - slug: anthropic
+    name: Anthropic
   - slug: databricks
     name: Databricks
-  - slug: stripe
-    name: Stripe
   - slug: cloudflare
     name: Cloudflare
   - slug: gitlab
     name: GitLab
+  - slug: stripe
+    name: Stripe
   - slug: twilio
     name: Twilio
   - slug: reddit
@@ -23,6 +28,8 @@ greenhouse:
 lever:
   - slug: palantir
     name: Palantir
+  - slug: shieldai
+    name: Shield AI
   - slug: zoox
     name: Zoox
 
@@ -47,3 +54,45 @@ ashby:
     name: ElevenLabs
   - slug: modal
     name: Modal
+
+workday:
+  - name: Booz Allen Hamilton
+    tenant: bah
+    wd_instance: wd1
+    site: BAH_Jobs
+  - name: Leidos
+    tenant: leidos
+    wd_instance: wd5
+    site: External
+  - name: CACI
+    tenant: caci
+    wd_instance: wd1
+    site: External
+  - name: General Dynamics IT (GDIT)
+    tenant: gdit
+    wd_instance: wd5
+    site: External_Career_Site
+  - name: RAND Corporation
+    tenant: rand
+    wd_instance: wd5
+    site: External_Career_Site
+  - name: Northrop Grumman
+    tenant: ngc
+    wd_instance: wd1
+    site: Northrop_Grumman_External_Site
+  - name: Draper Laboratory
+    tenant: draper
+    wd_instance: wd5
+    site: Draper_Careers
+  - name: Guidehouse
+    tenant: guidehouse
+    wd_instance: wd1
+    site: External
+  - name: MITRE
+    tenant: mitre
+    wd_instance: wd5
+    site: MITRE
+  - name: ManTech
+    tenant: mantech
+    wd_instance: wd1
+    site: External

@@ -85,6 +85,20 @@ class TestKeywordScorerRubric:
         assert score == 0.0
         assert breakdown["matched_groups"] == {}
 
+    def test_federal_unfair_advantage_boost_multipliers(self) -> None:
+        scorer = KeywordScorer()
+        fed_text = (
+            "Data Scientist supporting Federal DoD and IRS Criminal Investigation financial crime analytics. "
+            "Requires Secret clearance (or TS/SCI), SIPR/NIPR experience, SQLAlchemy ETL pipeline, and anomaly detection."
+        )
+        score, breakdown = scorer.score(fed_text, title="Data Scientist")
+        assert breakdown["tier_scores"]["federal_tier_1_boost"] == 25.0
+        assert breakdown["tier_scores"]["federal_tier_2_boost"] == 15.0
+        assert breakdown["unfair_advantage_boost"] == 40.0
+        assert "Clearance & Defense Networks" in breakdown["matched_groups"]
+        assert "Investigative & Financial Crime" in breakdown["matched_groups"]
+        assert score >= 40.0
+
 
 class TestResumeFolderDiscovery:
     """Verify automatic discovery and extraction of user resumes dropped into data/."""

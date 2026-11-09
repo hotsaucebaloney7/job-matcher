@@ -6,7 +6,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from src.ingest.ats_poller import fetch_greenhouse_board, fetch_lever_board
+from src.ingest.ats_poller import (
+    fetch_greenhouse_board,
+    fetch_lever_board,
+    fetch_workday_cxs_board,
+    parse_xml_job_feed,
+)
 from src.scoring.filters import (
     classify_location,
     compute_job_hash,
@@ -84,8 +89,16 @@ class TestLocationAndCommuteRules:
             ("Durham, NC", "Local"),
             ("Apex, NC", "Local"),
             ("Garner, NC", "Local"),
+            ("Chapel Hill, NC", "Local"),
+            ("Fort Liberty, NC", "Local"),
+            ("Fayetteville, NC", "Local"),
+            ("Washington, DC", "Local"),
+            ("McLean, VA", "Local"),
+            ("Fort Meade, MD", "Local"),
+            ("Annapolis Junction, MD", "Local"),
             ("Raleigh, NC (Hybrid)", "Hybrid"),
             ("Hybrid - Durham, NC", "Hybrid"),
+            ("Hybrid - Reston, VA", "Hybrid"),
         ],
     )
     def test_local_rtp_commute_whitelist(self, location_raw: str, expected: str) -> None:
@@ -211,6 +224,73 @@ class TestATSPollerParsers:
         assert job["workplace_type"] == "Hybrid"
         assert job["salary_min"] == 140000
         assert job["salary_max"] == 175000
+
+    def test_fetch_workday_cxs_and_xml_feed_parsers(self) -> None:
+        mock_session = MagicMock()
+        post_resp = MagicMock()
+        post_resp.status_code = 200
+        post_resp.json.return_value = {
+            "total": 2,
+            "jobPostings": [
+                {
+                    "title": "Data Scientist",
+                    "externalPath": "/job/McLean-VA/Data-Scientist_R100",
+                    "locationsText": "McLean, VA",
+                    "bulletFields": ["R100"],
+                },
+                {
+                    "title": "Director of Data Science",  # Knocked out by seniority
+                    "externalPath": "/job/McLean-VA/Director_R101",
+                    "locationsText": "McLean, VA",
+                    "bulletFields": ["R101"],
+                },
+            ],
+        }
+        mock_session.post.return_value = post_resp
+
+        det_resp = MagicMock()
+        det_resp.status_code = 200
+        det_resp.json.return_value = {
+            "jobPostingInfo": {
+                "title": "Data Scientist",
+                "location": "McLean, VA",
+                "jobReqId": "R100",
+                "startDate": "2026-11-05",
+                "jobDescription": "<p>2+ years of Python, SQL, and Top Secret clearance for DoD analytics.</p>",
+            }
+        }
+        mock_session.get.return_value = det_resp
+
+        wd_matched, wd_raw = fetch_workday_cxs_board(
+            tenant="bah",
+            wd_instance="wd1",
+            site="BAH_Jobs",
+            company_name="Booz Allen Hamilton",
+            session=mock_session,
+            search_terms=("Data Scientist",),
+        )
+        assert wd_raw == 2
+        assert len(wd_matched) == 1
+        assert wd_matched[0]["company"] == "Booz Allen Hamilton"
+        assert wd_matched[0]["source"] == "workday"
+        assert wd_matched[0]["workplace_type"] == "Local"
+
+        sample_xml = """<?xml version="1.0" encoding="UTF-8"?>
+        <rss version="2.0">
+          <channel>
+            <item>
+              <title>AI Engineer</title>
+              <link>https://careers.mitre.org/jobs/ai-eng-1</link>
+              <location>McLean, VA</location>
+              <description>Build DoD RAG pipelines in Python with Secret clearance.</description>
+            </item>
+          </channel>
+        </rss>"""
+        xml_matched, xml_raw = parse_xml_job_feed(sample_xml, company_name="MITRE")
+        assert xml_raw == 1
+        assert len(xml_matched) == 1
+        assert xml_matched[0]["company"] == "MITRE"
+        assert xml_matched[0]["source"] == "xml_feed"
 
 
 class TestFakeRemoteAndHybridDetection:

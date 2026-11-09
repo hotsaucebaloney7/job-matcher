@@ -296,25 +296,25 @@ def poll_jsearch_rapidapi(
     }
     queries = [
         {
-            "label": "Raleigh / RTP Local (Data Scientist)",
+            "label": "Raleigh / RTP / Fort Liberty Local",
             "params": {
-                "query": "Data Scientist in Raleigh, NC",
+                "query": "Data Scientist Data Engineer Machine Learning in Raleigh Durham Fort Liberty NC",
                 "num_pages": "1",
                 "date_posted": "week",
             },
         },
         {
-            "label": "Raleigh / RTP Local (AI / ML Engineer)",
+            "label": "DMV Defense & FFRDC Contractors (MITRE / RTI / SAIC / Peraton / Parsons)",
             "params": {
-                "query": "AI Engineer Machine Learning Engineer in Raleigh, NC",
+                "query": "Data Scientist Data Engineer Machine Learning at MITRE RTI SAIC Peraton Parsons ManTech in Washington DC Virginia Maryland",
                 "num_pages": "1",
                 "date_posted": "week",
             },
         },
         {
-            "label": "US Remote (Data Scientist / AI Engineer)",
+            "label": "US Remote (Data Scientist / AI / Data Engineer)",
             "params": {
-                "query": "Remote Data Scientist AI Engineer in USA",
+                "query": "Remote Data Scientist AI Engineer Data Engineer in USA",
                 "work_from_home": "true",
                 "num_pages": "1",
                 "date_posted": "week",
@@ -466,13 +466,21 @@ def poll_usajobs(
         "Accept": "application/json",
     }
 
+    # Track 1 Federal Series: 1560 (Data Science), 1550 (Computer Science), 2210 (IT/Data/SecOps),
+    # 1515 (Operations Research), 0132 (Intelligence), plus 1529/1530/0854
+    federal_series = "1560;1550;2210;1515;0132;1529;1530;0854"
+    federal_hiring_paths = "public;vet;direct;fed-competitive;fed-excepted"
+
     queries = [
         {
-            "label": "Raleigh / RTP (25 mi)",
+            "label": "Raleigh / RTP / Fort Liberty (NC)",
             "params": {
                 "LocationName": "Raleigh, North Carolina",
-                "Radius": "25",
-                "JobCategoryCode": "1560;1550;1515;1529;1530;2210;0854",
+                "Radius": "55",
+                "JobCategoryCode": federal_series,
+                "PayGradeLow": "11",
+                "PayGradeHigh": "14",
+                "HiringPath": federal_hiring_paths,
                 "ResultsPerPage": "100",
             },
             "is_remote_query": False,
@@ -482,7 +490,10 @@ def poll_usajobs(
             "params": {
                 "LocationName": "Washington, District of Columbia",
                 "Radius": "25",
-                "JobCategoryCode": "1560;1550;1515;1529;1530;2210;0854",
+                "JobCategoryCode": federal_series,
+                "PayGradeLow": "11",
+                "PayGradeHigh": "14",
+                "HiringPath": federal_hiring_paths,
                 "ResultsPerPage": "100",
             },
             "is_remote_query": False,
@@ -492,23 +503,31 @@ def poll_usajobs(
             "params": {
                 "LocationName": "Fort George G. Meade, Maryland",
                 "Radius": "25",
-                "JobCategoryCode": "1560;1550;1515;1529;1530;2210;0854",
+                "JobCategoryCode": federal_series,
+                "PayGradeLow": "11",
+                "PayGradeHigh": "14",
+                "HiringPath": federal_hiring_paths,
                 "ResultsPerPage": "100",
             },
             "is_remote_query": False,
         },
         {
-            "label": "Federal Data Scientist (1560)",
+            "label": "Federal Data Scientist (1560 GS-11..14)",
             "params": {
                 "Keyword": "Data Scientist",
+                "JobCategoryCode": "1560;1550;2210;1515;0132",
+                "PayGradeLow": "11",
+                "PayGradeHigh": "14",
                 "ResultsPerPage": "100",
             },
             "is_remote_query": False,
         },
         {
-            "label": "Federal AI / Machine Learning",
+            "label": "Federal AI / Machine Learning / ETL",
             "params": {
-                "Keyword": "Machine Learning",
+                "Keyword": "Machine Learning Data Engineer Python",
+                "PayGradeLow": "11",
+                "PayGradeHigh": "14",
                 "ResultsPerPage": "100",
             },
             "is_remote_query": False,

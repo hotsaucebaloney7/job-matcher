@@ -17,22 +17,26 @@ EXCLUDED_TITLE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# 2. Target role families (Primary + Accepted Variations + Federal Quantitative Series)
+# 2. Target role families (Primary + Accepted Variations + Federal Quantitative/Intelligence Series)
 TARGET_TITLE_PATTERN = re.compile(
-    r"(?:data\s+scien|ai\s+engineer|artificial\s+intelligence\s+engineer|"
-    r"machine\s+learning|ml\s+engineer|applied\s+ai|data\s+engineer|"
-    r"ml\s*ops|genai|generative\s+ai|operations\s+research\s+analyst|statistician)",
+    r"(?:data\s+scien|ai\s+engineer|artificial\s+intelligence|machine\s+learning|"
+    r"ml\s+engineer|applied\s+ai|data\s+engineer|etl\s+developer|etl\s+engineer|"
+    r"ml\s*ops|genai|generative\s+ai|operations\s+research\s+analyst|statistician|"
+    r"intelligence\s+analyst|cyber\s+data\s+scientist)",
     re.IGNORECASE,
 )
 
-# 3. Mode 2: Local <= 25 Min Commute (~15-mile radius around Raleigh / RTP, NC)
+# 3. Mode 2: Local Corridors — North Carolina (Raleigh/RTP/Fort Liberty) + DMV Corridor (DC/MD/VA)
 LOCAL_RTP_PATTERN = re.compile(
-    r"\b(?:raleigh|cary|morrisville|rtp|research\s+triangle|garner|apex|durham|wake)\b",
+    r"\b(?:"
+    r"raleigh|cary|morrisville|rtp|research\s+triangle|garner|apex|durham|wake|"
+    r"chapel\s+hill|fort\s+liberty|fort\s+bragg|fayetteville"
+    r")\b",
     re.IGNORECASE,
 )
 
-# 3b. USAJOBS-Specific Region: Washington, DC, Fort Meade, MD, and surrounding DMV / Baltimore-Washington corridor
-USAJOBS_DC_FORT_MEADE_PATTERN = re.compile(
+# 3b. DMV Corridor: Washington DC, Northern Virginia, and Maryland (Fort Meade / Bethesda / etc.)
+DMV_CORRIDOR_PATTERN = re.compile(
     r"(?:"
     r"\bwashington\s*,?\s*(?:dc|d\.c\.|district\s+of\s+columbia)\b|"
     r"\bdistrict\s+of\s+columbia\b|"
@@ -41,12 +45,13 @@ USAJOBS_DC_FORT_MEADE_PATTERN = re.compile(
     r"\b(?:annapolis\s+junction|odenton|laurel|columbia|linthicum|hanover|elkridge|"
     r"baltimore|silver\s+spring|bethesda|rockville|greenbelt|suitland|college\s+park|"
     r"new\s+carrollton|lanham|bowie|hyattsville|adele|adelphi|andrews\s+afb|joint\s+base\s+andrews|"
-    r"fort\s+detrick|aberdeen\s+proving\s+ground|apg|patuxent\s+river|indian\s+head)\b|"
+    r"joint\s+base\s+anacostia|fort\s+detrick|aberdeen\s+proving\s+ground|apg|patuxent\s+river|indian\s+head)\b|"
     r"\b(?:arlington|alexandria|mclean|tysons|reston|herndon|chantilly|fairfax|"
-    r"falls\s+church|springfield|fort\s+belvoir|quantico|dahlgren|pentagon)\b"
+    r"falls\s+church|springfield|fort\s+belvoir|quantico|dahlgren|pentagon|northern\s+virginia|nova)\b"
     r")",
     re.IGNORECASE,
 )
+USAJOBS_DC_FORT_MEADE_PATTERN = DMV_CORRIDOR_PATTERN
 
 # 4. Mode 1: Remote indicators & Non-US exclusions
 REMOTE_INCLUSION_PATTERN = re.compile(
@@ -213,9 +218,9 @@ def is_target_title(title: str) -> bool:
 
 def classify_location(
     location_raw: Optional[str],
-    allow_dc_fort_meade: bool = False,
+    allow_dc_fort_meade: bool = True,
 ) -> Optional[WorkplaceType]:
-    """Evaluate location against Local (Raleigh/RTP <=25 min, plus DC/Fort Meade when allow_dc_fort_meade=True) and US-Remote rules.
+    """Evaluate location against NC (Raleigh/RTP/Fort Liberty), DMV Corridor (DC/MD/VA), and US-Remote rules.
 
     Returns:
         'Local', 'Hybrid', or 'Remote' if the location passes the filter;
@@ -226,15 +231,15 @@ def classify_location(
 
     loc = location_raw.strip()
 
-    # Check Mode 2 first: Local Raleigh/RTP commute radius (or USAJOBS DC / Fort Meade corridor)
+    # Check Mode 2 first: NC (Raleigh/RTP/Fort Liberty) or DMV Corridor (DC/MD/VA)
     if LOCAL_RTP_PATTERN.search(loc) or (
-        allow_dc_fort_meade and USAJOBS_DC_FORT_MEADE_PATTERN.search(loc)
+        allow_dc_fort_meade and DMV_CORRIDOR_PATTERN.search(loc)
     ):
         if HYBRID_PATTERN.search(loc):
             return "Hybrid"
         return "Local"
 
-    # Check Mode 1: US-eligible Remote
+    # Check Mode 1: US-eligible Remote / Telework-eligible
     if REMOTE_INCLUSION_PATTERN.search(loc):
         # If explicitly tagged US alongside global hubs, allow if US is mentioned,
         # otherwise reject if non-US exclusion regions are present.
@@ -248,15 +253,15 @@ def classify_location(
 
 
 def has_non_local_onsite_requirement(description_text: Optional[str]) -> bool:
-    """Return True if a 'Remote' job's description explicitly mandates non-local hybrid/on-site attendance."""
+    """Return True if a 'Remote' job's description explicitly mandates non-target hybrid/on-site attendance."""
     if not description_text:
         return False
     for match in MANDATORY_ONSITE_HYBRID_PATTERN.finditer(description_text):
-        # Check a +/- 120 char window around the mandate; if it's hybrid in Raleigh/RTP, allow it
+        # Check a +/- 120 char window around the mandate; if it's hybrid in NC (RTP/Ft Liberty) or DMV, allow it
         start = max(0, match.start() - 120)
         end = min(len(description_text), match.end() + 120)
         context = description_text[start:end]
-        if not LOCAL_RTP_PATTERN.search(context):
+        if not (LOCAL_RTP_PATTERN.search(context) or DMV_CORRIDOR_PATTERN.search(context)):
             return True
     return False
 
@@ -267,7 +272,7 @@ def evaluate_posting(
     location_raw: Optional[str],
     description_text: Optional[str] = None,
     max_experience_years: int = DEFAULT_MAX_EXPERIENCE_YEARS,
-    allow_dc_fort_meade: bool = False,
+    allow_dc_fort_meade: bool = True,
 ) -> Tuple[bool, Optional[WorkplaceType], Optional[str], str]:
     """Run all Step 3.1 Hard Knockout Filters (including max years of experience) on a job posting.
 

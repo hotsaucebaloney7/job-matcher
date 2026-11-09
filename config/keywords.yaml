@@ -102,3 +102,56 @@ tiers:
         - hypothesis testing
         - time series
         - bayesian
+
+  # Track 1 Federal / Defense / Law-Enforcement Analytics "Unfair Advantage" Boosts
+  # Applied as additive point multipliers when federal/clearance/investigative signals are present.
+  federal_tier_1_boost:
+    name: "Federal Tier 1 Boost: Clearance, DoD & Financial Crime"
+    points_per_group: 22
+    max_points: 25
+    groups:
+      Clearance & Defense Networks:
+        - top secret
+        - ts/sci
+        - secret clearance
+        - clearanceable
+        - active clearance
+        - security clearance
+        - dod
+        - department of defense
+        - sipr
+        - siprnet
+        - nipr
+        - niprnet
+        - veterans preference
+      Investigative & Financial Crime:
+        - irs
+        - criminal investigation
+        - financial crime
+        - tax evasion
+        - anti-money laundering
+        - illicit finance
+        - law enforcement
+
+  federal_tier_2_boost:
+    name: "Federal Tier 2 Boost: Public Mission, ETL & Applied ML"
+    points_per_group: 12
+    max_points: 15
+    groups:
+      Public Sector & FFRDC Mission:
+        - public trust
+        - federal
+        - ffrdc
+        - government contractor
+        - national security
+        - intelligence community
+      Investigative ETL & Anomaly Analytics:
+        - etl pipeline
+        - sqlalchemy
+        - data cleaning
+        - entity resolution
+        - anomaly detection
+        - fraud detection
+        - pyspark
+        - computer vision
+        - semiconductor

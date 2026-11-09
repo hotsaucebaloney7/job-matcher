@@ -129,17 +129,21 @@ class KeywordScorer:
                 if found_terms:
                     matched_groups[group_name] = found_terms
                     tier_earned += pts_per_group
-                else:
+                elif not str(tier_key).startswith("federal_"):
                     missing_groups.append(group_name)
 
             tier_capped = min(tier_earned, max_pts)
             tier_scores[tier_key] = tier_capped
             total_score += tier_capped
 
+        unfair_advantage_boost = round(
+            sum(v for k, v in tier_scores.items() if str(k).startswith("federal_")), 2
+        )
         final_score = round(min(max(total_score, 0.0), 100.0), 2)
         exp_info = self.evaluate_experience(text, title=title)
         breakdown: Dict[str, Any] = {
             "tier_scores": tier_scores,
+            "unfair_advantage_boost": unfair_advantage_boost,
             "matched_groups": matched_groups,
             "missing_groups": missing_groups,
             **exp_info,
