@@ -622,8 +622,8 @@ class TestAshbyAndExternalAggregatorClients:
             assert res["prompt_path"] is not None and res["prompt_path"].exists()
             assert len(res["tailored_files"]) == 1
 
-            # Simulate an already-created tailored .docx resume inside its position subfolder
-            pos_dir = out_dir / "Mistral_AI_Applied_AI_Engineer"
+            # Simulate an already-created tailored .docx resume inside its business/position subfolder
+            pos_dir = out_dir / "Mistral_AI" / "Applied_AI_Engineer"
             pos_dir.mkdir(parents=True, exist_ok=True)
             existing_docx = pos_dir / "EngelhardtJoshuaResume.docx"
             existing_docx.write_bytes(b"fake-docx-content")

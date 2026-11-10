@@ -559,14 +559,21 @@ def _meaningful_tokens(text: str) -> List[str]:
     return [t for t in raw if t not in _STOP_WORDS and len(t) >= 2]
 
 
+def get_company_folder(
+    company: str,
+    output_dir: Path = DEFAULT_TAILORED_DIR,
+) -> Path:
+    """Return the canonical business/company folder path: `data/tailored/<Company_Slug>/`."""
+    return output_dir / _slugify(company)
+
+
 def get_position_folder(
     company: str,
     title: str,
     output_dir: Path = DEFAULT_TAILORED_DIR,
 ) -> Path:
-    """Return the canonical position subfolder path: `data/tailored/<Company_Slug>_<Title_Slug>/`."""
-    folder_slug = f"{_slugify(company)}_{_slugify(title)}"
-    return output_dir / folder_slug
+    """Return the canonical position subfolder path grouped by business: `data/tailored/<Company_Slug>/<Title_Slug>/`."""
+    return get_company_folder(company, output_dir=output_dir) / _slugify(title)
 
 
 def find_existing_tailored_resume(
@@ -574,7 +581,7 @@ def find_existing_tailored_resume(
     title: str,
     output_dir: Path = DEFAULT_TAILORED_DIR,
 ) -> Optional[Path]:
-    """Return an existing tailored resume file (`EngelhardtJoshuaResume.docx`) inside a position subfolder (or legacy flat file)."""
+    """Return an existing tailored resume file (`EngelhardtJoshuaResume.docx`) inside `data/tailored/<Company>/<Position>/` (or legacy folders)."""
     if not output_dir.exists():
         return None
 
@@ -589,43 +596,64 @@ def find_existing_tailored_resume(
         if t not in {"senior", "jr", "junior", "ii", "iii", "iv", "staff", "lead"}
     ]
 
-    # 1. Exact canonical position folder check: data/tailored/<Company_Slug>_<Title_Slug>/EngelhardtJoshuaResume.docx
+    # 1. Exact canonical nested path check: data/tailored/<Company_Slug>/<Title_Slug>/EngelhardtJoshuaResume.docx
     canonical_dir = get_position_folder(company, title, output_dir=output_dir)
     canonical_file = canonical_dir / TAILORED_RESUME_FILENAME
     if canonical_file.exists():
         return canonical_file
 
+    # 2. Legacy flat position folder check: data/tailored/<Company_Slug>_<Title_Slug>/EngelhardtJoshuaResume.docx
+    legacy_dir = output_dir / f"{_slugify(company)}_{_slugify(title)}"
+    legacy_file = legacy_dir / TAILORED_RESUME_FILENAME
+    if legacy_file.exists():
+        return legacy_file
+
     best_match: Optional[Path] = None
     best_score = 0
 
+    # Collect candidate (stem_for_tokens, name_low, target_file, is_dir_candidate) tuples across nested company/position dirs & legacy items
+    candidates: List[tuple[str, str, Path, bool]] = []
     for entry in output_dir.iterdir():
-        # Check position subfolders first (e.g. data/tailored/<Position_Folder>/EngelhardtJoshuaResume.docx)
         if entry.is_dir():
-            resume_candidates = [
+            # Check if this directory directly holds a resume file (legacy flat position folder)
+            direct_resumes = [
                 f for f in entry.iterdir()
                 if f.is_file()
                 and f.suffix.lower() in {".docx", ".pdf"}
                 and "argon_prompt" not in f.name.lower()
             ]
-            if not resume_candidates:
-                continue
-            target_file = next(
-                (f for f in resume_candidates if f.name.lower() == TAILORED_RESUME_FILENAME.lower()),
-                resume_candidates[0],
-            )
-            name_low = entry.name.lower()
-            stem_for_tokens = entry.name
+            if direct_resumes:
+                target_file = next(
+                    (f for f in direct_resumes if f.name.lower() == TAILORED_RESUME_FILENAME.lower()),
+                    direct_resumes[0],
+                )
+                candidates.append((entry.name, entry.name.lower(), target_file, True))
+
+            # Also check nested position folders inside a company folder: data/tailored/<Company>/<Position>/EngelhardtJoshuaResume.docx
+            for sub in entry.iterdir():
+                if sub.is_dir():
+                    nested_resumes = [
+                        f for f in sub.iterdir()
+                        if f.is_file()
+                        and f.suffix.lower() in {".docx", ".pdf"}
+                        and "argon_prompt" not in f.name.lower()
+                    ]
+                    if nested_resumes:
+                        target_file = next(
+                            (f for f in nested_resumes if f.name.lower() == TAILORED_RESUME_FILENAME.lower()),
+                            nested_resumes[0],
+                        )
+                        combined_name = f"{entry.name}_{sub.name}"
+                        candidates.append((combined_name, combined_name.lower(), target_file, True))
         elif entry.is_file():
             name_low = entry.name.lower()
             if "argon_prompt" in name_low or "tailoring_prompt" in name_low:
                 continue
             if entry.suffix.lower() not in {".docx", ".pdf", ".md", ".txt"}:
                 continue
-            target_file = entry
-            stem_for_tokens = entry.stem
-        else:
-            continue
+            candidates.append((entry.stem, name_low, entry, False))
 
+    for stem_for_tokens, name_low, target_file, is_dir_candidate in candidates:
         # Exact full slug match
         if full_slug and full_slug in name_low:
             return target_file
@@ -659,7 +687,7 @@ def find_existing_tailored_resume(
             best_match = target_file
         elif (
             best_match is None
-            and (entry.is_dir() or "resume" in name_low or "tailored" in name_low)
+            and (is_dir_candidate or "resume" in name_low or "tailored" in name_low)
             and len(company_tokens) == 1
             and company_tokens[0] != "reddit"
         ):
@@ -752,7 +780,7 @@ def process_want_to_apply_queue(
             resume_filename=resolved_resume_path.name,
         )
         pos_dir = get_position_folder(job["company"], job["title"], output_dir=output_dir)
-        slug = pos_dir.name
+        slug = f"{pos_dir.parent.name}_{pos_dir.name}"
         job_prompt_file = output_dir / f"{today_str}_{slug}_Argon_Prompt.txt"
         job_prompt_file.write_text(single_prompt, encoding="utf-8")
         tailored_files.append(job_prompt_file)

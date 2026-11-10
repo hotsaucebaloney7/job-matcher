@@ -2,13 +2,14 @@
 name: tailor-resume
 description: >-
   Automatically fetches jobs marked 'Want to Apply' from the user's Notion board,
-  checks data/tailored/ position folders to skip postings that already have an
-  EngelhardtJoshuaResume.docx file, loads the generated Argon prompt packets for
-  new postings and the user's master .docx resume from data/, and generates tailored
-  resume summaries, bullet rewrites, ATS keyword alignments, and tailored
-  EngelhardtJoshuaResume.docx and EngelhardtJoshuaCV.docx files inside position-named
-  subfolders. Activate this skill whenever the user asks to tailor their resume,
-  prepare an application, or process their Notion 'Want to Apply' queue.
+  checks data/tailored/<Company_Slug>/<Title_Slug>/ folders to skip postings that
+  already have an EngelhardtJoshuaResume.docx file, loads the generated Argon prompt
+  packets for new postings and the user's master .docx resume from data/, and generates
+  tailored resume summaries, bullet rewrites, ATS keyword alignments, and tailored
+  EngelhardtJoshuaResume.docx and EngelhardtJoshuaCV.docx files grouped by business
+  inside data/tailored/<Company_Slug>/<Title_Slug>/. Activate this skill whenever the
+  user asks to tailor their resume, prepare an application, or process their Notion
+  'Want to Apply' queue.
 ---
 
 # Automated Notion 'Want to Apply' Resume Tailoring Skill
@@ -17,18 +18,18 @@ Use this skill whenever the user asks to tailor their resume for jobs in their N
 
 ## Step-by-Step Procedure
 
-1. **Refresh the Notion `'Want to Apply'` Queue & Check for Existing Position Folders:**
-   - First, inspect `data/tailored/` to see which position subfolders **already contain `EngelhardtJoshuaResume.docx`** (i.e., `data/tailored/<Company_Slug>_<Title_Slug>/EngelhardtJoshuaResume.docx`).
+1. **Refresh the Notion `'Want to Apply'` Queue & Check for Existing Business / Position Folders:**
+   - First, inspect `data/tailored/` to see which business/position subfolders **already contain `EngelhardtJoshuaResume.docx`** (grouped by business: `data/tailored/<Company_Slug>/<Title_Slug>/EngelhardtJoshuaResume.docx`).
    - Run the queue processor:
      ```powershell
      C:\Users\jenge\anaconda3\envs\job-matcher\python.exe -m src.exporters.resume_tailor
      ```
-     Note: `process_want_to_apply_queue()` automatically checks `find_existing_tailored_resume(company, title)` across `data/tailored/` subfolders and **skips** any `'Want to Apply'` card that already has `EngelhardtJoshuaResume.docx` inside its position folder unless the user explicitly asks to tailor/regenerate that specific posting.
+     Note: `process_want_to_apply_queue()` automatically checks `find_existing_tailored_resume(company, title)` across `data/tailored/<Company_Slug>/<Title_Slug>/` subfolders and **skips** any `'Want to Apply'` card that already has `EngelhardtJoshuaResume.docx` inside its folder unless the user explicitly asks to tailor/regenerate that specific posting.
    - If the user explicitly names a posting that was already skipped (or asks to redo it), you can read the job's details directly from MySQL or run `process_want_to_apply_queue(..., force_regenerate=True)`.
 
 2. **Never Recreate an Existing Tailored Resume in Batch Mode Unless Explicitly Asked:**
-   - In general batch mode (*"tailor my resume"*), if `data/tailored/<Position_Folder>/EngelhardtJoshuaResume.docx` **already exists** for a `Company` + `Title`, **skip recreating it** and report:
-     `[SKIP] <Company> — <Title> (already tailored: data/tailored/<Position_Folder>/EngelhardtJoshuaResume.docx)`
+   - In general batch mode (*"tailor my resume"*), if `data/tailored/<Company_Slug>/<Title_Slug>/EngelhardtJoshuaResume.docx` **already exists** for a `Company` + `Title`, **skip recreating it** and report:
+     `[SKIP] <Company> — <Title> (already tailored: data/tailored/<Company_Slug>/<Title_Slug>/EngelhardtJoshuaResume.docx)`
    - Only process the **new / untailored** postings from the `'Want to Apply'` queue (or the specific posting the user asked for).
 
 3. **Preview Changes First & Enforce Strict Closed-World Skills for ALL Resumes in the Queue (Mandatory Human-in-the-Loop Approval):**
@@ -46,13 +47,13 @@ Use this skill whenever the user asks to tailor their resume for jobs in their N
        5. **Cover Letter Preview (`EngelhardtJoshuaCV.docx`):** Show the concise 3-paragraph cover letter text that will be saved to `EngelhardtJoshuaCV.docx` for each job.
      - Immediately delete any temporary `.txt` or `.md` prompt files generated during Step 1 (`Remove-Item data\tailored\*.txt, data\tailored\*.md -Force -ErrorAction SilentlyContinue`) before stopping.
      - Then **STOP and ask the user for confirmation across all queued resumes**:
-       > *"Have you used any of the skills in the **Candidate Skill Check** list(s) above that you'd like me to include for any of these roles, or should I generate `EngelhardtJoshuaResume.docx` and `EngelhardtJoshuaCV.docx` in `data/tailored/<Position_Folder>/` for all queued positions using only your existing resume skills?"*
+       > *"Have you used any of the skills in the **Candidate Skill Check** list(s) above that you'd like me to include for any of these roles, or should I generate `EngelhardtJoshuaResume.docx` and `EngelhardtJoshuaCV.docx` in `data/tailored/<Company_Slug>/<Title_Slug>/` for all queued positions using only your existing resume skills?"*
      - **Only** proceed to Step 4 to write the `.docx` files **after** the user replies and approves the changes!
 
-4. **Save `EngelhardtJoshuaResume.docx` and `EngelhardtJoshuaCV.docx` Inside Each Position-Named Folder in `data/tailored/` (After User Approval Only):**
-   - **Only after the user has reviewed the preview and confirmed** (whether for 1 role or all roles in the queue), create a subfolder inside `data/tailored/` named after each approved company and position (using `get_position_folder(company, title)` from `src.exporters.resume_tailor`, i.e., `data/tailored/<Company_Slug>_<Title_Slug>/`).
+4. **Save `EngelhardtJoshuaResume.docx` and `EngelhardtJoshuaCV.docx` Grouped by Business in `data/tailored/<Company_Slug>/<Title_Slug>/` (After User Approval Only):**
+   - **Only after the user has reviewed the preview and confirmed** (whether for 1 role or all roles in the queue), create the business and position subfolder inside `data/tailored/` (using `get_position_folder(company, title)` from `src.exporters.resume_tailor`, i.e., `data/tailored/<Company_Slug>/<Title_Slug>/`).
    - Load the user's active `.docx` resume in `data/` using `python-docx` (`from docx import Document`), apply the approved Professional Summary, Technical Skills adjustments, and bullet rewrites while preserving paragraph/run styling, and save the tailored resume with the exact filename **`EngelhardtJoshuaResume.docx`**:
-     `data/tailored/<Company_Slug>_<Title_Slug>/EngelhardtJoshuaResume.docx`
-   - Also generate the matching cover letter file using the same letterhead (`JOSH ENGELHARDT` + contact line from `data/EngelhardtJoshuaResume.docx`) and save it inside the exact same position folder with the filename **`EngelhardtJoshuaCV.docx`**:
-     `data/tailored/<Company_Slug>_<Title_Slug>/EngelhardtJoshuaCV.docx`
-   - Immediately **delete any temporary `.txt` or `.md` prompt files** in `data/tailored/` (`Remove-Item data\tailored\*.txt, data\tailored\*.md -Force -ErrorAction SilentlyContinue`) so `data/tailored/` only contains clean position folders holding `EngelhardtJoshuaResume.docx` and `EngelhardtJoshuaCV.docx`!
+     `data/tailored/<Company_Slug>/<Title_Slug>/EngelhardtJoshuaResume.docx`
+   - Also generate the matching cover letter file using the same letterhead (`JOSH ENGELHARDT` + contact line from `data/EngelhardtJoshuaResume.docx`) and save it inside the exact same business/position folder with the filename **`EngelhardtJoshuaCV.docx`**:
+     `data/tailored/<Company_Slug>/<Title_Slug>/EngelhardtJoshuaCV.docx`
+   - Immediately **delete any temporary `.txt` or `.md` prompt files** in `data/tailored/` (`Remove-Item data\tailored\*.txt, data\tailored\*.md -Force -ErrorAction SilentlyContinue`) so `data/tailored/` only contains clean business folders (`<Company_Slug>/<Title_Slug>/`) holding `EngelhardtJoshuaResume.docx` and `EngelhardtJoshuaCV.docx`!
