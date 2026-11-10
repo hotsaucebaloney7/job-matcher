@@ -139,16 +139,20 @@ def fetch_want_to_apply_jobs(
                 matched_groups = mk.get("matched_groups") if isinstance(mk.get("matched_groups"), dict) else {}
                 missing_groups = mk.get("missing_groups") if isinstance(mk.get("missing_groups"), list) else []
                 exp_tier = str(mk.get("experience_tier") or "Unspecified (Target)")
+                resolved_url = db_row.url or url_prop
+                req_id = extract_requisition_id(external_id=db_row.external_id, url=resolved_url)
 
                 results.append(
                     {
                         "notion_page_id": page_id,
                         "job_hash": db_row.job_hash,
+                        "external_id": db_row.external_id or "",
+                        "req_id": req_id,
                         "company": db_row.company or company_prop or "Unknown Company",
                         "title": db_row.title or raw_title or "Target Role",
                         "workplace_type": db_row.workplace_type or workplace_prop,
                         "location_raw": db_row.location_raw or "",
-                        "url": db_row.url or url_prop,
+                        "url": resolved_url,
                         "match_score": float(db_row.match_score or score_prop or 0.0),
                         "keyword_score": float(db_row.keyword_score or 0.0),
                         "semantic_score": float(db_row.semantic_score or 0.0),
@@ -165,10 +169,13 @@ def fetch_want_to_apply_jobs(
                 if " — " in raw_title and not company:
                     parts = raw_title.split(" — ", 1)
                     company, title = parts[0].strip(), parts[1].strip()
+                req_id = extract_requisition_id(external_id=None, url=url_prop)
                 results.append(
                     {
                         "notion_page_id": page_id,
                         "job_hash": None,
+                        "external_id": "",
+                        "req_id": req_id,
                         "company": company or "Unknown Company",
                         "title": title or "Target Role",
                         "workplace_type": workplace_prop,
@@ -246,9 +253,20 @@ def build_argon_tailoring_prompt(
         desc = (job.get("description_text") or "").strip()
 
         loc_tag = format_location_tag(location, workplace)
+        req_id = job.get("req_id") or extract_requisition_id(job.get("external_id"), url)
+        target_folder_rel = get_position_folder(
+            company,
+            title,
+            output_dir=Path("data/tailored"),
+            req_id=req_id,
+            external_id=job.get("external_id"),
+            url=url,
+        ).as_posix()
         lines.extend(
             [
                 f"### Job #{idx}: {company} — {title} (`[{loc_tag}]`)",
+                f"- **Requisition ID:** `{req_id or 'N/A'}`",
+                f"- **Target Tailored Folder:** `{target_folder_rel}/`",
                 f"- **Location:** {location}",
                 f"- **Posting URL:** {url}",
                 f"- **Hybrid Match Score:** `{match_score:.1f}/100` (Keyword: `{kw_score:.1f}`, Semantic BGE: `{sem_score:.1f}`, Tier: `{exp_tier}`)",
@@ -561,6 +579,56 @@ def _meaningful_tokens(text: str) -> List[str]:
     return [t for t in raw if t not in _STOP_WORDS and len(t) >= 2]
 
 
+def extract_requisition_id(
+    external_id: Optional[str] = None,
+    url: Optional[str] = None,
+) -> str:
+    """Extract a clean requisition / job ID token from external_id or posting URL."""
+    ext = (external_id or "").strip()
+    url_str = (url or "").strip()
+
+    # 1. If external_id is a standard UUID, use its first 8 hex characters
+    m_uuid_ext = re.match(
+        r"^([0-9a-fA-F]{8})-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+        ext,
+    )
+    if m_uuid_ext:
+        return m_uuid_ext.group(1)
+
+    # 2. If external_id is a compact requisition code or numeric job ID (e.g. R0245112, RQ229926, R-00193829, 334066, 8104403)
+    if 1 <= len(ext) <= 20 and re.match(r"^[A-Za-z0-9_-]+$", ext):
+        return re.sub(r"[^A-Za-z0-9-]+", "", ext)
+
+    # 3. Extract from URL if external_id was missing or a long base64 token (e.g. JSearch)
+    if url_str:
+        # Workday URL suffix: _R0245112, _RQ210960-2, _334066
+        m_wd = re.search(r"_([A-Za-z0-9-]+?)(?:-\d+)?/?(?:\?.*)?$", url_str)
+        if m_wd and 2 <= len(m_wd.group(1)) <= 20:
+            return m_wd.group(1)
+
+        # UUID inside URL
+        m_uuid_url = re.search(
+            r"([0-9a-fA-F]{8})-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+            url_str,
+        )
+        if m_uuid_url:
+            return m_uuid_url.group(1)
+
+        # Numeric ID in URL path or query (?id=641833497027807247, /jobs/8104403, -4485739827)
+        m_num = re.search(r"(?:[/?=&_-])(\d{4,20})(?:[/?&#]|$)", url_str)
+        if m_num:
+            return m_num.group(1)
+
+        # Trailing hex hash in URL (--e3c1b739fa86...)
+        m_hex = re.search(r"--([0-9a-fA-F]{8})[0-9a-fA-F]*$", url_str)
+        if m_hex:
+            return m_hex.group(1)
+
+    if ext:
+        return re.sub(r"[^A-Za-z0-9]+", "", ext)[:10]
+    return ""
+
+
 def get_company_folder(
     company: str,
     output_dir: Path = DEFAULT_TAILORED_DIR,
@@ -573,19 +641,36 @@ def get_position_folder(
     company: str,
     title: str,
     output_dir: Path = DEFAULT_TAILORED_DIR,
+    req_id: Optional[str] = None,
+    external_id: Optional[str] = None,
+    url: Optional[str] = None,
 ) -> Path:
-    """Return the canonical position subfolder path grouped by business: `data/tailored/<Company_Slug>/<Title_Slug>/`."""
-    return get_company_folder(company, output_dir=output_dir) / _slugify(title)
+    """Return the canonical position subfolder path grouped by business with requisition number:
+    `data/tailored/<Company_Slug>/<Title_Slug>_<Req_ID>/` (or `<Title_Slug>/` when no req ID is provided).
+    """
+    resolved_req = (req_id or extract_requisition_id(external_id=external_id, url=url)).strip()
+    title_slug = _slugify(title)
+    if resolved_req:
+        safe_req = re.sub(r"[^a-zA-Z0-9-]+", "", resolved_req)[:20]
+        if safe_req and not title_slug.lower().endswith(f"_{safe_req.lower()}"):
+            title_slug = f"{title_slug}_{safe_req}"
+    return get_company_folder(company, output_dir=output_dir) / title_slug
 
 
 def find_existing_tailored_resume(
     company: str,
     title: str,
     output_dir: Path = DEFAULT_TAILORED_DIR,
+    req_id: Optional[str] = None,
+    external_id: Optional[str] = None,
+    url: Optional[str] = None,
 ) -> Optional[Path]:
-    """Return an existing tailored resume file (`EngelhardtJoshuaResume.docx`) inside `data/tailored/<Company>/<Position>/` (or legacy folders)."""
+    """Return an existing tailored resume file (`EngelhardtJoshuaResume.docx`) inside `data/tailored/<Company>/<Position>_<ReqID>/` (or legacy folders)."""
     if not output_dir.exists():
         return None
+
+    resolved_req = (req_id or extract_requisition_id(external_id=external_id, url=url)).strip()
+    req_low = resolved_req.lower()
 
     company_slug = _slugify(company).lower()
     title_slug = _slugify(title).lower()
@@ -599,13 +684,20 @@ def find_existing_tailored_resume(
     ]
     title_tokens = [t for t in raw_title_tokens if t != "data"] or raw_title_tokens
 
-    # 1. Exact canonical nested path check: data/tailored/<Company_Slug>/<Title_Slug>/EngelhardtJoshuaResume.docx
+    # 1. Exact canonical nested path check WITH requisition number: data/tailored/<Company_Slug>/<Title_Slug>_<Req_ID>/EngelhardtJoshuaResume.docx
+    if resolved_req:
+        canonical_req_dir = get_position_folder(company, title, output_dir=output_dir, req_id=resolved_req)
+        canonical_req_file = canonical_req_dir / TAILORED_RESUME_FILENAME
+        if canonical_req_file.exists():
+            return canonical_req_file
+
+    # 2. Exact canonical nested path check WITHOUT requisition number: data/tailored/<Company_Slug>/<Title_Slug>/EngelhardtJoshuaResume.docx
     canonical_dir = get_position_folder(company, title, output_dir=output_dir)
     canonical_file = canonical_dir / TAILORED_RESUME_FILENAME
     if canonical_file.exists():
         return canonical_file
 
-    # 2. Legacy flat position folder check: data/tailored/<Company_Slug>_<Title_Slug>/EngelhardtJoshuaResume.docx
+    # 3. Legacy flat position folder check: data/tailored/<Company_Slug>_<Title_Slug>/EngelhardtJoshuaResume.docx
     legacy_dir = output_dir / f"{_slugify(company)}_{_slugify(title)}"
     legacy_file = legacy_dir / TAILORED_RESUME_FILENAME
     if legacy_file.exists():
@@ -632,7 +724,7 @@ def find_existing_tailored_resume(
                 )
                 candidates.append((entry.name, entry.name.lower(), target_file, True))
 
-            # Also check nested position folders inside a company folder: data/tailored/<Company>/<Position>/EngelhardtJoshuaResume.docx
+            # Also check nested position folders inside a company folder: data/tailored/<Company>/<Position>_<ReqID>/EngelhardtJoshuaResume.docx
             for sub in entry.iterdir():
                 if sub.is_dir():
                     nested_resumes = [
@@ -646,6 +738,9 @@ def find_existing_tailored_resume(
                             (f for f in nested_resumes if f.name.lower() == TAILORED_RESUME_FILENAME.lower()),
                             nested_resumes[0],
                         )
+                        # If req_low matches the suffix of this folder inside the matching company folder, return immediately!
+                        if req_low and entry.name.lower() == company_slug and sub.name.lower().endswith(f"_{req_low}"):
+                            return target_file
                         combined_name = f"{entry.name}_{sub.name}"
                         candidates.append((combined_name, combined_name.lower(), target_file, True))
         elif entry.is_file():
@@ -742,7 +837,14 @@ def process_want_to_apply_queue(
         existing_file = (
             None
             if force_regenerate
-            else find_existing_tailored_resume(job["company"], job["title"], output_dir=output_dir)
+            else find_existing_tailored_resume(
+                job["company"],
+                job["title"],
+                output_dir=output_dir,
+                req_id=job.get("req_id"),
+                external_id=job.get("external_id"),
+                url=job.get("url"),
+            )
         )
         if existing_file is not None:
             job["existing_resume_file"] = existing_file
@@ -782,7 +884,14 @@ def process_want_to_apply_queue(
             resume_text=resume_text,
             resume_filename=resolved_resume_path.name,
         )
-        pos_dir = get_position_folder(job["company"], job["title"], output_dir=output_dir)
+        pos_dir = get_position_folder(
+            job["company"],
+            job["title"],
+            output_dir=output_dir,
+            req_id=job.get("req_id"),
+            external_id=job.get("external_id"),
+            url=job.get("url"),
+        )
         slug = f"{pos_dir.parent.name}_{pos_dir.name}"
         job_prompt_file = output_dir / f"{today_str}_{slug}_Argon_Prompt.txt"
         job_prompt_file.write_text(single_prompt, encoding="utf-8")
