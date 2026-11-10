@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from src.db.models import JobPosting
+from src.scoring.filters import format_location_tag
 
 DEFAULT_REPORTS_DIR = Path(__file__).resolve().parents[2] / "reports"
 DEFAULT_MIN_SCORE = 65.0
@@ -30,8 +31,16 @@ def format_salary_range(salary_min: Optional[int], salary_max: Optional[int]) ->
     return "Not listed"
 
 
-def format_workplace_badge(workplace_type: str) -> str:
-    """Return a standardized uppercase badge string ([REMOTE], [LOCAL], [HYBRID])."""
+def format_workplace_badge(
+    workplace_type: str,
+    location_raw: Optional[str] = None,
+) -> str:
+    """Return a standardized location badge string (e.g. [Raleigh NC], [McLean VA], [Fort Meade MD], [REMOTE])."""
+    if location_raw:
+        tag = format_location_tag(location_raw, workplace_type)
+        if tag.lower() == "remote":
+            return "[REMOTE]"
+        return f"[{tag}]"
     wt = (workplace_type or "Remote").strip().upper()
     return f"[{wt}]"
 
@@ -75,7 +84,7 @@ def render_cli_table(
     table.add_column("Matched Skill Groups", style="dim")
 
     for idx, row in enumerate(postings, start=1):
-        badge_raw = format_workplace_badge(row.workplace_type)
+        badge_raw = format_workplace_badge(row.workplace_type, row.location_raw)
         badge_styled = (
             f"[green]{badge_raw}[/green]"
             if row.workplace_type == "Remote"
@@ -133,7 +142,7 @@ def generate_markdown_digest(
         ]
     )
     for idx, row in enumerate(postings, start=1):
-        badge = format_workplace_badge(row.workplace_type)
+        badge = format_workplace_badge(row.workplace_type, row.location_raw)
         salary_str = format_salary_range(row.salary_min, row.salary_max)
         kw_dict = row.matched_keywords or {}
         exp_tier = kw_dict.get("experience_tier") or "Unspecified"
@@ -146,7 +155,7 @@ def generate_markdown_digest(
     lines.extend(["", "---", "", "## Detailed Match Breakdown", ""])
 
     for idx, row in enumerate(postings, start=1):
-        badge = format_workplace_badge(row.workplace_type)
+        badge = format_workplace_badge(row.workplace_type, row.location_raw)
         salary_str = format_salary_range(row.salary_min, row.salary_max)
         kw_dict = row.matched_keywords or {}
         exp_tier = kw_dict.get("experience_tier") or "Unspecified"

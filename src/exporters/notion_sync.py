@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from src.db.models import JobPosting
 from src.exporters.markdown_digest import format_salary_range
+from src.scoring.filters import format_location_tag
 
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
@@ -199,11 +200,12 @@ def sync_to_notion(
             exp_tier = mk.get("experience_tier", "Unspecified (Target)")
             salary_str = format_salary_range(row.salary_min, row.salary_max)
 
+            location_tag = format_location_tag(row.location_raw, row.workplace_type)
             properties: Dict[str, Any] = {
                 title_prop: {"title": [{"text": {"content": f"{row.company} — {row.title}"[:200]}}]},
                 "Company": {"rich_text": [{"text": {"content": (row.company or "")[:200]}}]},
                 "Match Score": {"number": round(float(row.match_score or 0.0), 1)},
-                "Workplace": {"select": {"name": row.workplace_type or "Remote"}},
+                "Workplace": {"select": {"name": location_tag}},
                 "URL": {"url": row.url},
             }
 

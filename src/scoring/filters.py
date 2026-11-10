@@ -304,3 +304,98 @@ def evaluate_posting(
 
     job_hash = compute_job_hash(company, title, workplace_type)
     return True, workplace_type, job_hash, "Passed"
+
+
+_CANONICAL_LOCATION_TAG_RULES: Tuple[Tuple[re.Pattern[str], str], ...] = (
+    # North Carolina (RTP / Fort Liberty Corridor)
+    (re.compile(r"\b(?:fort\s+liberty|fort\s+bragg)\b", re.IGNORECASE), "Fort Liberty NC"),
+    (re.compile(r"(?:\bfayetteville\b|\|\s*faye$)", re.IGNORECASE), "Fayetteville NC"),
+    (re.compile(r"\braleigh\b", re.IGNORECASE), "Raleigh NC"),
+    (re.compile(r"\bdurham\b", re.IGNORECASE), "Durham NC"),
+    (re.compile(r"\bcary\b", re.IGNORECASE), "Cary NC"),
+    (re.compile(r"\bmorrisville\b", re.IGNORECASE), "Morrisville NC"),
+    (re.compile(r"\bchapel\s+hill\b", re.IGNORECASE), "Chapel Hill NC"),
+    (re.compile(r"\b(?:rtp|research\s+triangle)\b", re.IGNORECASE), "RTP NC"),
+    (re.compile(r"\bapex\b", re.IGNORECASE), "Apex NC"),
+    (re.compile(r"\bgarner\b", re.IGNORECASE), "Garner NC"),
+    (re.compile(r"\bwake\b", re.IGNORECASE), "Raleigh NC"),
+    # Washington, DC
+    (
+        re.compile(
+            r"(?:\bwashington\s*,?\s*(?:dc|d\.c\.|district\s+of\s+columbia)\b|"
+            r"\bdistrict\s+of\s+columbia\b|\bus\s*-\s*dc\b|\bjoint\s+base\s+anacostia)",
+            re.IGNORECASE,
+        ),
+        "Washington DC",
+    ),
+    # Maryland (Fort Meade / National Capital Region)
+    (re.compile(r"\b(?:fort|ft\.?)\s+(?:george\s+g\.?\s+)?meade\b", re.IGNORECASE), "Fort Meade MD"),
+    (re.compile(r"\bannapolis\s+junction\b", re.IGNORECASE), "Annapolis Junction MD"),
+    (re.compile(r"\bbethesda\b", re.IGNORECASE), "Bethesda MD"),
+    (re.compile(r"\bsilver\s+spring\b", re.IGNORECASE), "Silver Spring MD"),
+    (re.compile(r"\brockville\b", re.IGNORECASE), "Rockville MD"),
+    (re.compile(r"\bgreenbelt\b", re.IGNORECASE), "Greenbelt MD"),
+    (re.compile(r"\bsuitland\b", re.IGNORECASE), "Suitland MD"),
+    (re.compile(r"\bcollege\s+park\b", re.IGNORECASE), "College Park MD"),
+    (re.compile(r"\blanham\b", re.IGNORECASE), "Lanham MD"),
+    (re.compile(r"\badelphi\b", re.IGNORECASE), "Adelphi MD"),
+    (re.compile(r"\blaurel\b", re.IGNORECASE), "Laurel MD"),
+    (re.compile(r"\bodenton\b", re.IGNORECASE), "Odenton MD"),
+    (re.compile(r"\blinthicum\b", re.IGNORECASE), "Linthicum MD"),
+    (re.compile(r"\bhanover\b", re.IGNORECASE), "Hanover MD"),
+    (re.compile(r"\b(?:baltimore|woodlawn|elkridge)\b", re.IGNORECASE), "Baltimore MD"),
+    (re.compile(r"\bcolumbia\s*,\s*md\b|\busa?\s*-?\s*md\s*,?\s*columbia\b", re.IGNORECASE), "Columbia MD"),
+    (re.compile(r"\b(?:andrews\s+afb|joint\s+base\s+andrews)\b", re.IGNORECASE), "JB Andrews MD"),
+    (re.compile(r"\bfort\s+detrick\b", re.IGNORECASE), "Fort Detrick MD"),
+    (re.compile(r"\b(?:aberdeen\s+proving\s+ground|apg)\b", re.IGNORECASE), "Aberdeen MD"),
+    (re.compile(r"\bpatuxent\s+river\b", re.IGNORECASE), "Patuxent River MD"),
+    (re.compile(r"\bindian\s+head\b", re.IGNORECASE), "Indian Head MD"),
+    # Virginia (Northern Virginia / Defense Corridor)
+    (re.compile(r"\bmclean\b", re.IGNORECASE), "McLean VA"),
+    (re.compile(r"\btysons\b", re.IGNORECASE), "Tysons VA"),
+    (re.compile(r"\b(?:arlington|pentagon)\b", re.IGNORECASE), "Arlington VA"),
+    (re.compile(r"\balexandria\b", re.IGNORECASE), "Alexandria VA"),
+    (re.compile(r"\breston\b", re.IGNORECASE), "Reston VA"),
+    (re.compile(r"\bherndon\b", re.IGNORECASE), "Herndon VA"),
+    (re.compile(r"\bchantilly\b", re.IGNORECASE), "Chantilly VA"),
+    (re.compile(r"\bfairfax\b", re.IGNORECASE), "Fairfax VA"),
+    (re.compile(r"\bfalls\s+church\b", re.IGNORECASE), "Falls Church VA"),
+    (re.compile(r"\bspringfield\b", re.IGNORECASE), "Springfield VA"),
+    (re.compile(r"\bfort\s+belvoir\b", re.IGNORECASE), "Fort Belvoir VA"),
+    (re.compile(r"\bquantico\b", re.IGNORECASE), "Quantico VA"),
+    (re.compile(r"\bdahlgren\b", re.IGNORECASE), "Dahlgren VA"),
+    (re.compile(r"\b(?:dulles|sterling|ashburn)\b", re.IGNORECASE), "Dulles VA"),
+    (re.compile(r"\b(?:northern\s+virginia|nova)\b", re.IGNORECASE), "Northern VA"),
+)
+
+
+def format_location_tag(
+    location_raw: Optional[str],
+    workplace_type: Optional[str] = None,
+) -> str:
+    """Return a clean, comma-free location tag (e.g. 'McLean VA', 'Fort Meade MD', 'Raleigh NC', 'Remote') suitable for Notion Select tags and CLI/Markdown badges."""
+    text = (location_raw or "").strip()
+    for pattern, label in _CANONICAL_LOCATION_TAG_RULES:
+        if pattern.search(text):
+            return label
+
+    if not text or re.match(
+        r"^(?:anywhere|us\s*-\s*remote.*|remote.*|flexible\s*/\s*remote|any\s+location.*|\d+\s+remote.*|us|united\s+states)$",
+        text,
+        re.IGNORECASE,
+    ):
+        return "Remote"
+
+    if re.search(r"\b(?:remote|anywhere|telework|wfh)\b", text, re.IGNORECASE) or (workplace_type or "").lower() == "remote":
+        clean_city = re.sub(r"\s*(?:\|.*|;.*|\(hq\)|\(.*remote.*\))", "", text, flags=re.IGNORECASE).strip()
+        clean_city = re.sub(r"^us\s*-\s*([a-z]{2})\s*,\s*(.+)$", r"\2 \1", clean_city, flags=re.IGNORECASE)
+        clean_city = re.sub(r",\s*(?:united\s+states|us|usa|orange\s+county)$", "", clean_city, flags=re.IGNORECASE)
+        clean_city = re.sub(r"\beast\s+irvine\b", "Irvine CA", clean_city, flags=re.IGNORECASE)
+        clean_city = re.sub(r"\birvine\s*,\s*california\b", "Irvine CA", clean_city, flags=re.IGNORECASE)
+        clean_city = clean_city.replace(",", "").strip()
+        if clean_city and clean_city.lower() not in ("remote", "anywhere", "us", "united states"):
+            return f"Remote ({clean_city[:28]})"
+        return "Remote"
+
+    fallback = text.split("|")[0].replace(",", "").strip()
+    return fallback[:35] if fallback else (workplace_type or "Remote")

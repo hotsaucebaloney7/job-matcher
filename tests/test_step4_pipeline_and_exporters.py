@@ -239,7 +239,7 @@ class TestEndToEndPipelineOrchestrator:
         assert report_path.exists()
         md_text = report_path.read_text(encoding="utf-8")
         assert "RaleighAI" in md_text
-        assert "`[LOCAL]`" in md_text
+        assert "`[Raleigh NC]`" in md_text
 
 
 class TestAshbyAndExternalAggregatorClients:

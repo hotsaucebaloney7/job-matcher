@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 
 from src.db.models import JobPosting
 from src.db.session import get_session_factory, init_db
+from src.scoring.filters import format_location_tag
 from src.exporters.notion_sync import (
     NOTION_DATABASE_URL,
     NOTION_VERSION,
@@ -244,9 +245,10 @@ def build_argon_tailoring_prompt(
         missing_str = ", ".join(missing_groups) if missing_groups else "None flagged"
         desc = (job.get("description_text") or "").strip()
 
+        loc_tag = format_location_tag(location, workplace)
         lines.extend(
             [
-                f"### Job #{idx}: {company} — {title} (`[{workplace.upper()}]`)",
+                f"### Job #{idx}: {company} — {title} (`[{loc_tag}]`)",
                 f"- **Location:** {location}",
                 f"- **Posting URL:** {url}",
                 f"- **Hybrid Match Score:** `{match_score:.1f}/100` (Keyword: `{kw_score:.1f}`, Semantic BGE: `{sem_score:.1f}`, Tier: `{exp_tier}`)",
@@ -591,10 +593,11 @@ def find_existing_tailored_resume(
 
     company_tokens = _meaningful_tokens(company)
     primary_company_token = company_tokens[0] if company_tokens else company_slug
-    title_tokens = [
+    raw_title_tokens = [
         t for t in _meaningful_tokens(title)
         if t not in {"senior", "jr", "junior", "ii", "iii", "iv", "staff", "lead"}
     ]
+    title_tokens = [t for t in raw_title_tokens if t != "data"] or raw_title_tokens
 
     # 1. Exact canonical nested path check: data/tailored/<Company_Slug>/<Title_Slug>/EngelhardtJoshuaResume.docx
     canonical_dir = get_position_folder(company, title, output_dir=output_dir)
