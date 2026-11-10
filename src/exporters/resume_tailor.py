@@ -752,7 +752,6 @@ def process_want_to_apply_queue(
             resume_filename=resolved_resume_path.name,
         )
         pos_dir = get_position_folder(job["company"], job["title"], output_dir=output_dir)
-        pos_dir.mkdir(parents=True, exist_ok=True)
         slug = pos_dir.name
         job_prompt_file = output_dir / f"{today_str}_{slug}_Argon_Prompt.txt"
         job_prompt_file.write_text(single_prompt, encoding="utf-8")

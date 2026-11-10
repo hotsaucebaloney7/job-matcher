@@ -6,9 +6,9 @@ description: >-
   EngelhardtJoshuaResume.docx file, loads the generated Argon prompt packets for
   new postings and the user's master .docx resume from data/, and generates tailored
   resume summaries, bullet rewrites, ATS keyword alignments, and tailored
-  EngelhardtJoshuaResume.docx files inside position-named subfolders. Activate this
-  skill whenever the user asks to tailor their resume, prepare an application, or
-  process their Notion 'Want to Apply' queue.
+  EngelhardtJoshuaResume.docx and EngelhardtJoshuaCV.docx files inside position-named
+  subfolders. Activate this skill whenever the user asks to tailor their resume,
+  prepare an application, or process their Notion 'Want to Apply' queue.
 ---
 
 # Automated Notion 'Want to Apply' Resume Tailoring Skill
@@ -31,24 +31,28 @@ Use this skill whenever the user asks to tailor their resume for jobs in their N
      `[SKIP] <Company> — <Title> (already tailored: data/tailored/<Position_Folder>/EngelhardtJoshuaResume.docx)`
    - Only process the **new / untailored** postings from the `'Want to Apply'` queue (or the specific posting the user asked for).
 
-3. **Preview Changes First & Enforce Strict Closed-World Skills (Human-in-the-Loop Approval):**
-   - **STRICT CLOSED-WORLD SKILL RULE (NO UNAPPROVED SKILLS IN RESUME):**
-     - You must **ONLY** use skills, tools, frameworks, and methodologies that **already exist on the user's Master Resume** when drafting the Tailored Summary, Technical Skills, and Experience/Project Bullets.
-     - **NEVER** sneak new skills, tools, or methods from the job description (or from missing ATS skill groups) into the resume draft itself unless the user has explicitly confirmed they have done them.
-     - Instead, collect all missing/suggested skills from the job posting into **one single, dedicated section** in your response (`### ❓ Candidate Skill Check — Have You Done Any of These?`) so the user can review them in one place and tell you which ones (if any) they have actually done.
-   - **CRITICAL PREVIEW RULE:** Whenever the user specifies a particular job posting to tailor (or in batch mode before writing `.docx` files if new skills are in question), **DO NOT write the `.docx` file immediately!**
-   - Present a clear **Before $\rightarrow$ After Proposed Changes Preview** in chat first:
-     1. **Tailored Professional Summary:** Show **Current Summary** vs. **Proposed Tailored Summary (3–4 lines)** using **only** skills and experience already present on the master resume, framed to match the role's focus.
-     2. **Technical Skills Adjustments (Reordering / Emphasis Only):** Show **Current Line(s)** vs. **Proposed Line(s)** reordering or emphasizing existing master-resume skills to match the posting—with **zero unverified new skills added**.
-     3. **Experience & Project Bullet Rewrites:** For each bullet you plan to modify, show **Original Bullet** $\rightarrow$ **Proposed Rewritten Bullet** (`Action Verb + Technical Method/Tool + Quantified Impact`) using **only** tools and work already on the master resume.
-     4. **❓ Candidate Skill Check — Have You Done Any of These? (Single Consolidated List):** List all high-value skills/tools from the job description that are **not** currently on the master resume in one single bulleted checklist, asking the user if they have experience with any of them and want them added.
-     5. **3-Sentence Cover Letter / Cold Outreach Hook:** Show a concise opening paragraph ready to paste into the application portal.
-   - Then **STOP and ask the user for confirmation**:
-     > *"Have you used any of the skills in the **Candidate Skill Check** list above that you'd like me to include, or should I generate `data/tailored/<Position_Folder>/EngelhardtJoshuaResume.docx` using only your existing resume skills?"*
-   - Only write the `.docx` file in Step 4 **after** the user approves.
+3. **Preview Changes First & Enforce Strict Closed-World Skills for ALL Resumes in the Queue (Mandatory Human-in-the-Loop Approval):**
+   - **STRICT CLOSED-WORLD SKILL RULE (NO UNAPPROVED SKILLS IN RESUME OR COVER LETTER):**
+     - You must **ONLY** use skills, tools, frameworks, and methodologies that **already exist on the user's Master Resume** when drafting the Tailored Summary, Technical Skills, Experience/Project Bullets, and Cover Letter (`EngelhardtJoshuaCV.docx`).
+     - **NEVER** sneak new skills, tools, or methods from the job description (or from missing ATS skill groups) into the resume or cover letter draft unless the user has explicitly confirmed they have done them.
+     - Instead, collect all missing/suggested skills from each job posting into **one single, dedicated section** (`### ❓ Candidate Skill Check — Have You Done Any of These?`) so the user can review them in one place and tell you which ones (if any) they have actually done.
+   - **MANDATORY PREVIEW & APPROVAL FOR ALL QUEUED RESUMES (NO EXCEPTIONS IN BATCH MODE):**
+     - Whether the user asks to tailor a single specific posting **OR** asks to tailor all jobs in the Notion **`Want to Apply`** / **`Ready to Apply`** queue in batch mode, **NEVER write any `.docx` files or create any position folders immediately!**
+     - You **MUST** present a clear **Before $\rightarrow$ After Proposed Changes Preview** in chat for **EVERY** untailored job in the queue first. For each job in the queue, show:
+       1. **Tailored Professional Summary:** Show **Current Summary** vs. **Proposed Tailored Summary (3–4 lines)** using **only** skills and experience already present on the master resume, framed to match the role's focus.
+       2. **Technical Skills Adjustments (Reordering / Emphasis Only):** Show **Current Line(s)** vs. **Proposed Line(s)** reordering or emphasizing existing master-resume skills to match the posting—with **zero unverified new skills added**.
+       3. **Experience & Project Bullet Rewrites:** For each bullet you plan to modify, show **Original Bullet** $\rightarrow$ **Proposed Rewritten Bullet** (`Action Verb + Technical Method/Tool + Quantified Impact`) using **only** tools and work already on the master resume.
+       4. **❓ Candidate Skill Check — Have You Done Any of These? (Consolidated Checklist):** List all high-value skills/tools from the job description(s) that are **not** currently on the master resume in a clear checklist, asking the user if they have experience with any of them and want them added to the corresponding resume(s).
+       5. **Cover Letter Preview (`EngelhardtJoshuaCV.docx`):** Show the concise 3-paragraph cover letter text that will be saved to `EngelhardtJoshuaCV.docx` for each job.
+     - Immediately delete any temporary `.txt` or `.md` prompt files generated during Step 1 (`Remove-Item data\tailored\*.txt, data\tailored\*.md -Force -ErrorAction SilentlyContinue`) before stopping.
+     - Then **STOP and ask the user for confirmation across all queued resumes**:
+       > *"Have you used any of the skills in the **Candidate Skill Check** list(s) above that you'd like me to include for any of these roles, or should I generate `EngelhardtJoshuaResume.docx` and `EngelhardtJoshuaCV.docx` in `data/tailored/<Position_Folder>/` for all queued positions using only your existing resume skills?"*
+     - **Only** proceed to Step 4 to write the `.docx` files **after** the user replies and approves the changes!
 
-4. **Save `EngelhardtJoshuaResume.docx` Inside a Position-Named Folder in `data/tailored/` & Clean Up Temporary `.txt`/`.md` Files:**
-   - Once approved (or in batch mode), create a subfolder inside `data/tailored/` named after the company and position (using `get_position_folder(company, title)` from `src.exporters.resume_tailor`, i.e., `data/tailored/<Company_Slug>_<Title_Slug>/`).
-   - Load the user's active `.docx` resume in `data/` using `python-docx` (`from docx import Document`), apply the approved Professional Summary, Technical Skills adjustments, and bullet rewrites while preserving paragraph/run styling, and save the file with the exact filename **`EngelhardtJoshuaResume.docx`**:
+4. **Save `EngelhardtJoshuaResume.docx` and `EngelhardtJoshuaCV.docx` Inside Each Position-Named Folder in `data/tailored/` (After User Approval Only):**
+   - **Only after the user has reviewed the preview and confirmed** (whether for 1 role or all roles in the queue), create a subfolder inside `data/tailored/` named after each approved company and position (using `get_position_folder(company, title)` from `src.exporters.resume_tailor`, i.e., `data/tailored/<Company_Slug>_<Title_Slug>/`).
+   - Load the user's active `.docx` resume in `data/` using `python-docx` (`from docx import Document`), apply the approved Professional Summary, Technical Skills adjustments, and bullet rewrites while preserving paragraph/run styling, and save the tailored resume with the exact filename **`EngelhardtJoshuaResume.docx`**:
      `data/tailored/<Company_Slug>_<Title_Slug>/EngelhardtJoshuaResume.docx`
-   - Immediately **delete any temporary `.txt` or `.md` prompt files** in `data/tailored/` (`Remove-Item data\tailored\*.txt, data\tailored\*.md -Force -ErrorAction SilentlyContinue`) so `data/tailored/` only contains clean position folders holding `EngelhardtJoshuaResume.docx`!
+   - Also generate the matching cover letter file using the same letterhead (`JOSH ENGELHARDT` + contact line from `data/EngelhardtJoshuaResume.docx`) and save it inside the exact same position folder with the filename **`EngelhardtJoshuaCV.docx`**:
+     `data/tailored/<Company_Slug>_<Title_Slug>/EngelhardtJoshuaCV.docx`
+   - Immediately **delete any temporary `.txt` or `.md` prompt files** in `data/tailored/` (`Remove-Item data\tailored\*.txt, data\tailored\*.md -Force -ErrorAction SilentlyContinue`) so `data/tailored/` only contains clean position folders holding `EngelhardtJoshuaResume.docx` and `EngelhardtJoshuaCV.docx`!
