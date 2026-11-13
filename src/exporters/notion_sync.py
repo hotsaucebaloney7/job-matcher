@@ -235,6 +235,12 @@ def sync_to_notion(
                 row.notion_page_id = str(page_id)
                 synced_count += 1
         session.commit()
+        if own_http:
+            update_notion_board_counts_banner(
+                api_key=resolved_key,
+                database_id= database_id if database_id is not None else os.getenv("NOTION_DATABASE_ID", ""),
+                http_session=client,
+            )
     except Exception as exc:
         if console:
             console.print(f"[yellow]Warning:[/yellow] Notion sync encountered an error: {exc}")
@@ -336,3 +342,135 @@ def archive_expired_notion_pages(
             client.close()
 
     return archived_count
+
+
+BOARD_STATUS_ORDER = (
+    ("🔵 New Match", "New Match"),
+    ("🟡 Want to Apply", "Want to Apply"),
+    ("🟠 Applied", "Applied"),
+    ("🟣 Follow Up Needed", "Follow Up Needed"),
+    ("🟢 Interviewing", "Interviewing"),
+    ("🩷 Offer", "Offer"),
+    ("🔴 Declined / Rejected", "Declined / Rejected"),
+)
+
+
+def update_notion_board_counts_banner(
+    api_key: Optional[str] = None,
+    database_id: Optional[str] = None,
+    http_session: Optional[requests.Session] = None,
+) -> Dict[str, int]:
+    """Count cards in each Status column and update the top Callout banner above the Notion board."""
+    resolved_key = (api_key if api_key is not None else os.getenv("NOTION_API_KEY", "")).strip()
+    raw_id = normalize_notion_database_id(
+        database_id if database_id is not None else os.getenv("NOTION_DATABASE_ID", "")
+    )
+    if not (resolved_key and raw_id):
+        return {}
+
+    headers = {
+        "Authorization": f"Bearer {resolved_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": NOTION_VERSION,
+    }
+    own_http = http_session is None
+    client = http_session or requests.Session()
+    counts: Dict[str, int] = {status_name: 0 for _, status_name in BOARD_STATUS_ORDER}
+
+    try:
+        resolved_db, _ = _ensure_database_schema(client, headers, raw_id)
+        parent_page_id = raw_id if resolved_db != raw_id else None
+
+        # Paginate through all active cards in the database to tally each Status column
+        has_more = True
+        next_cursor: Optional[str] = None
+        while has_more:
+            body: Dict[str, Any] = {"page_size": 100}
+            if next_cursor:
+                body["start_cursor"] = next_cursor
+            q_resp = client.post(
+                f"{NOTION_DATABASE_URL}/{resolved_db}/query",
+                headers=headers,
+                json=body,
+                timeout=15,
+            )
+            if getattr(q_resp, "status_code", 0) != 200:
+                break
+            q_data = q_resp.json() or {}
+            for page in q_data.get("results") or []:
+                if not isinstance(page, dict) or page.get("archived"):
+                    continue
+                props = page.get("properties") or {}
+                st_prop = props.get("Status") or {}
+                sel = st_prop.get("select") or st_prop.get("status") or {}
+                st_name = (sel.get("name") or "").strip()
+                if st_name in counts:
+                    counts[st_name] += 1
+            has_more = bool(q_data.get("has_more"))
+            next_cursor = q_data.get("next_cursor")
+
+        if not parent_page_id:
+            db_meta = client.get(f"{NOTION_DATABASE_URL}/{resolved_db}", headers=headers, timeout=15)
+            if getattr(db_meta, "status_code", 0) == 200:
+                parent_info = (db_meta.json() or {}).get("parent") or {}
+                if parent_info.get("type") == "page_id":
+                    parent_page_id = (parent_info.get("page_id") or "").replace("-", "")
+
+        if parent_page_id:
+            blocks_resp = client.get(
+                f"https://api.notion.com/v1/blocks/{parent_page_id}/children",
+                headers=headers,
+                timeout=15,
+            )
+            if getattr(blocks_resp, "status_code", 0) == 200:
+                blocks = (blocks_resp.json() or {}).get("results") or []
+                callout_id = None
+                for blk in blocks:
+                    if isinstance(blk, dict) and blk.get("type") == "callout" and not blk.get("archived"):
+                        callout_id = blk.get("id")
+                        break
+
+                summary_parts = [f"{label}: {counts[st_name]}" for label, st_name in BOARD_STATUS_ORDER]
+                summary_line = "   |   ".join(summary_parts)
+                rich_text = [
+                    {
+                        "type": "text",
+                        "text": {"content": "📊 Live Column Counts:   "},
+                        "annotations": {"bold": True},
+                    },
+                    {
+                        "type": "text",
+                        "text": {"content": f"{summary_line}\n"},
+                        "annotations": {"bold": True, "code": True},
+                    },
+                    {
+                        "type": "text",
+                        "text": {
+                            "content": (
+                                "⚡ Quick Triage: Set Status = Want to Apply to queue for resume tailoring  •  "
+                                "Set Status = Applied (+ Date Applied & Follow-Up Date) when submitted  •  "
+                                "Set Status = Not Interested to hide from board."
+                            )
+                        },
+                    },
+                ]
+                if callout_id:
+                    client.patch(
+                        f"https://api.notion.com/v1/blocks/{callout_id}",
+                        headers=headers,
+                        json={
+                            "callout": {
+                                "icon": {"type": "emoji", "emoji": "📊"},
+                                "color": "blue_background",
+                                "rich_text": rich_text,
+                            }
+                        },
+                        timeout=15,
+                    )
+    except Exception:
+        pass
+    finally:
+        if own_http:
+            client.close()
+
+    return counts
