@@ -227,6 +227,18 @@ class TestExperienceExtractionAndTiers:
                 "2+ years of AI/ML professional experience with production AI systems",
                 5,
             ),
+            (
+                "HS diploma or GED and 6+ years of experience with software engineering, "
+                "or Bachelor's degree and 4+ years of experience with AI/ML.\n"
+                "Nice If You Have:\n"
+                "10+ years of experience with software engineering or AI/ML.",
+                4,
+            ),
+            (
+                "Bachelor's degree or equivalent (minimum 12 years) work experience. "
+                "(If Associate's Degree, must have minimum 6 years work experience)",
+                None,
+            ),
             ("8+ years of experience in production ML systems.", 8),
             ("For over 25 years, our company has built great products.", None),
             ("Must be at least 18 years of age.", None),

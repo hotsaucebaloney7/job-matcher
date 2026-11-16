@@ -127,16 +127,36 @@ BACHELOR_DEGREE_LINE_PATTERN = re.compile(
     r"\b(?:b\.?s\.?|b\.?a\.?|bachelor'?s?|undergraduate)\b",
     re.IGNORECASE,
 )
+OPTIONAL_SECTION_HEADER_PATTERN = re.compile(
+    r"^\s*(?:nice\s+if\s+you\s+have|nice\s+to\s+have|desired(?:\s+qualifications|\s+skills)?|"
+    r"preferred(?:\s+qualifications|\s+skills)?|bonus\s+points)\s*:?\s*$",
+    re.IGNORECASE,
+)
+REQUIRED_SECTION_HEADER_PATTERN = re.compile(
+    r"^\s*(?:required|minimum\s+qualifications|basic\s+qualifications|you\s+have|qualifications|"
+    r"clearance|compensation|work\s+model)\s*:?\s*$",
+    re.IGNORECASE,
+)
+NON_DEGREE_EQUIVALENT_CLAUSE_PATTERN = re.compile(
+    r"(?:"
+    r"or\s+equivalent\s*\([^)]*?\d+\s*(?:years?|yrs?)[^)]*?\)|"
+    r"\(if\s+associate'?s?\s+degree[^)]*?\d+\s*(?:years?|yrs?)[^)]*?\)|"
+    r"\b(?:hs\s+diploma|high\s+school\s+diploma|ged|associate'?s?\s+degree)\b[^,;.]*?\b\d{1,2}\s*\+?\s*(?:years?|yrs?)\b[^,;.]*?(?:,\s*or\b|\bor\b)|"
+    r"(?:,\s*or\b|\bor\b)[^.\n]{0,50}?\b\d{1,2}\s*\+?\s*(?:years?|yrs?)\b[^.\n]{0,60}?\bin\s+lieu\s+of\s+(?:a\s+)?degree\b"
+    r")",
+    re.IGNORECASE,
+)
 
 
 def extract_min_years_experience(description_text: Optional[str]) -> Optional[int]:
     """Extract the effective required years of experience from a job description.
 
-    - Within a single line, if a Master's/PhD degree offset is mentioned (e.g. '5+ years with BS
-      or 3+ years with MS'), uses the lower Master's requirement; otherwise uses the max on that line
-      so sub-skill clauses ('5+ years BI experience, with 3+ years Grafana') don't mask the headline requirement.
-    - Across multiple qualification bullets, takes the maximum required years across general/technical
-      bullets (while allowing an explicit Master's degree line to offset a Bachelor's degree line).
+    - Ignores optional 'Nice If You Have / Desired / Preferred' section bullets to prevent Type II errors.
+    - Strips non-degree ('HS diploma + 6 yrs', 'or equivalent 12 yrs in lieu of degree') clauses when
+      a Bachelor's/Master's path is present.
+    - Within a single non-degree line, uses the max on that line so sub-skill clauses ('5+ years BI
+      experience, with 3+ years Grafana') don't mask the headline requirement.
+    - Across multiple required qualification bullets, takes the maximum required years across bullets.
     """
     if not description_text:
         return None
@@ -144,10 +164,24 @@ def extract_min_years_experience(description_text: Optional[str]) -> Optional[in
     general_years: list[int] = []
     bachelor_only_years: list[int] = []
     grad_offset_years: list[int] = []
+    in_optional_section = False
 
-    for line in description_text.splitlines():
-        if EXPERIENCE_IGNORE_CONTEXT.search(line):
+    for raw_line in description_text.splitlines():
+        if OPTIONAL_SECTION_HEADER_PATTERN.match(raw_line):
+            in_optional_section = True
             continue
+        if in_optional_section and REQUIRED_SECTION_HEADER_PATTERN.match(raw_line):
+            in_optional_section = False
+            continue
+        if in_optional_section:
+            continue
+
+        if EXPERIENCE_IGNORE_CONTEXT.search(raw_line):
+            continue
+
+        # Remove non-degree ("HS diploma + 6 yrs", "or equivalent (minimum 12 years)") clauses first
+        line = NON_DEGREE_EQUIVALENT_CLAUSE_PATTERN.sub(" ", raw_line)
+
         line_years: list[int] = []
         for pattern in EXPERIENCE_PATTERNS:
             for match in pattern.finditer(line):
@@ -166,7 +200,7 @@ def extract_min_years_experience(description_text: Optional[str]) -> Optional[in
         if has_grad:
             grad_offset_years.append(min(line_years))
         elif has_bach:
-            bachelor_only_years.append(max(line_years))
+            bachelor_only_years.append(min(line_years))
         else:
             general_years.append(max(line_years))
 
