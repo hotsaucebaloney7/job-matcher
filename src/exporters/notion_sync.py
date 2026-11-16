@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from src.db.models import JobPosting
 from src.exporters.markdown_digest import format_salary_range
-from src.scoring.filters import format_location_tag
+from src.scoring.filters import format_location_tag, format_posting_age
 
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
@@ -130,6 +130,7 @@ def _ensure_database_schema(
             "Follow-Up Date": {"date": {}},
             "Contact / Notes": {"rich_text": {}},
             "Salary": {"rich_text": {}},
+            "Posted Age": {"rich_text": {}},
             "Source": {"select": {}},
             "Location": {"rich_text": {}},
             "URL": {"url": {}},
@@ -218,6 +219,7 @@ def sync_to_notion(
                         "Experience Tier": {"select": {"name": exp_tier}},
                         "Status": {"select": {"name": "New Match"}},
                         "Salary": {"rich_text": [{"text": {"content": salary_str}}]},
+                        "Posted Age": {"rich_text": [{"text": {"content": format_posting_age(row.date_posted)}}]},
                         "Source": {"select": {"name": row.source or "ats"}},
                         "Location": {"rich_text": [{"text": {"content": (row.location_raw or "")[:200]}}]},
                     }

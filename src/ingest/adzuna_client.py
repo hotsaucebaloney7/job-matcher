@@ -11,7 +11,7 @@ import requests
 from dotenv import load_dotenv
 from rich.console import Console
 
-from src.scoring.filters import evaluate_posting, strip_html
+from src.scoring.filters import evaluate_posting, is_stale_aggregator_posting, strip_html
 
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
@@ -24,6 +24,7 @@ LOCAL_QUERY_PARAMS: Dict[str, Any] = {
     "what_or": "Data Scientist AI Engineer Machine Learning Engineer Data Engineer MLOps",
     "where": "Raleigh, NC",
     "distance": 24,
+    "max_days_old": 60,
     "results_per_page": 50,
     "content-type": "application/json",
 }
@@ -32,6 +33,7 @@ LOCAL_QUERY_PARAMS: Dict[str, Any] = {
 REMOTE_QUERY_PARAMS: Dict[str, Any] = {
     "what_or": "Data Scientist AI Engineer Machine Learning Engineer",
     "what": "remote",
+    "max_days_old": 60,
     "results_per_page": 50,
     "content-type": "application/json",
 }
@@ -100,6 +102,10 @@ def _execute_adzuna_query(
         if not passed:
             continue
 
+        posted_dt = _parse_adzuna_date(item.get("created"))
+        if is_stale_aggregator_posting("adzuna", posted_dt):
+            continue
+
         salary_min = item.get("salary_min")
         salary_max = item.get("salary_max")
 
@@ -116,7 +122,7 @@ def _execute_adzuna_query(
                 "salary_max": int(salary_max) if isinstance(salary_max, (int, float)) else None,
                 "url": item.get("redirect_url") or "",
                 "description_text": description_text,
-                "date_posted": _parse_adzuna_date(item.get("created")),
+                "date_posted": posted_dt,
             }
         )
 

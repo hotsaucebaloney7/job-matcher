@@ -11,7 +11,7 @@ import requests
 from dotenv import load_dotenv
 from rich.console import Console
 
-from src.scoring.filters import evaluate_posting, strip_html
+from src.scoring.filters import evaluate_posting, is_stale_aggregator_posting, strip_html
 
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
@@ -108,6 +108,10 @@ def poll_remotive(
                     if not passed:
                         continue
 
+                    posted_dt = _parse_iso_dt(item.get("publication_date"))
+                    if is_stale_aggregator_posting("remotive", posted_dt):
+                        continue
+
                     deduped.setdefault(
                         job_hash,
                         {
@@ -122,7 +126,7 @@ def poll_remotive(
                             "salary_max": None,
                             "url": item.get("url") or "",
                             "description_text": description_text,
-                            "date_posted": _parse_iso_dt(item.get("publication_date")),
+                            "date_posted": posted_dt,
                         },
                     )
                     matched_count += 1
@@ -225,6 +229,10 @@ def poll_the_muse(
                         if not passed:
                             continue
 
+                        posted_dt = _parse_iso_dt(item.get("publication_date"))
+                        if is_stale_aggregator_posting("themuse", posted_dt):
+                            continue
+
                         refs = item.get("refs") or {}
                         if job_hash not in deduped:
                             deduped[job_hash] = {
@@ -239,7 +247,7 @@ def poll_the_muse(
                                 "salary_max": None,
                                 "url": refs.get("landing_page") or "",
                                 "description_text": description_text,
-                                "date_posted": _parse_iso_dt(item.get("publication_date")),
+                                "date_posted": posted_dt,
                             }
                             matched_count += 1
 
@@ -382,6 +390,10 @@ def poll_jsearch_rapidapi(
                     if not passed:
                         continue
 
+                    posted_dt = _parse_iso_dt(item.get("job_posted_at_datetime_utc"))
+                    if is_stale_aggregator_posting("jsearch", posted_dt):
+                        continue
+
                     sal_min = item.get("job_min_salary")
                     sal_max = item.get("job_max_salary")
                     period = (item.get("job_salary_period") or "").upper()
@@ -403,7 +415,7 @@ def poll_jsearch_rapidapi(
                             "salary_max": int(sal_max) if isinstance(sal_max, (int, float)) else None,
                             "url": apply_url,
                             "description_text": description_text,
-                            "date_posted": _parse_iso_dt(item.get("job_posted_at_datetime_utc")),
+                            "date_posted": posted_dt,
                         },
                     )
                     matched_count += 1

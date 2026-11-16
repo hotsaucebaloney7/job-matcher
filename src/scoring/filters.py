@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import html
 import re
+from datetime import datetime, timezone
 from typing import Literal, Optional, Tuple
 
 from bs4 import BeautifulSoup
@@ -399,3 +400,62 @@ def format_location_tag(
 
     fallback = text.split("|")[0].replace(",", "").strip()
     return fallback[:35] if fallback else (workplace_type or "Remote")
+
+
+AGGREGATOR_SOURCES = {"themuse", "adzuna", "jsearch", "remotive"}
+DEFAULT_MAX_AGGREGATOR_AGE_DAYS = 60
+
+
+def is_stale_aggregator_posting(
+    source: Optional[str],
+    date_posted: Optional[datetime],
+    max_age_days: int = DEFAULT_MAX_AGGREGATOR_AGE_DAYS,
+    reference_date: Optional[datetime] = None,
+) -> bool:
+    """Return True if a posting comes from a 3rd-party aggregator and is older than max_age_days.
+
+    Direct employer/federal boards (workday, greenhouse, lever, ashby, usajobs, xml_feed) are
+    never knocked out by age to avoid Type II errors on evergreen/cleared requisitions.
+    """
+    src = (source or "").strip().lower()
+    if src not in AGGREGATOR_SOURCES or date_posted is None:
+        return False
+
+    dt = date_posted
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+    ref = reference_date or datetime.now(timezone.utc).replace(tzinfo=None)
+    if ref.tzinfo is not None:
+        ref = ref.astimezone(timezone.utc).replace(tzinfo=None)
+
+    age_days = (ref - dt).days
+    return age_days > max_age_days
+
+
+def format_posting_age(
+    date_posted: Optional[datetime],
+    reference_date: Optional[datetime] = None,
+) -> str:
+    """Return a concise human-readable posting age string for Notion cards and Markdown digests."""
+    if date_posted is None:
+        return "Unlisted"
+
+    dt = date_posted
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+    ref = reference_date or datetime.now(timezone.utc).replace(tzinfo=None)
+    if ref.tzinfo is not None:
+        ref = ref.astimezone(timezone.utc).replace(tzinfo=None)
+
+    days = max(0, (ref - dt).days)
+    if days == 0:
+        return "Today (0d)"
+    if days <= 7:
+        return f"{days}d ago (Fresh)"
+    if days <= 30:
+        return f"{days}d ago"
+    if days <= 60:
+        return f"{days}d ago (30d+)"
+    return f"{days}d ago (Evergreen)"
