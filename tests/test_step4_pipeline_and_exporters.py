@@ -367,7 +367,7 @@ class TestAshbyAndExternalAggregatorClients:
         assert js_jobs[0]["url"] == "https://careers.rtpbioai.com/jobs/js-1"
         assert js_jobs[0]["salary_min"] == 135000
 
-        # 4. USAJOBS mock (Raleigh/RTP + Washington DC / Fort Meade corridor)
+        # 4. USAJOBS mock (Raleigh/RTP + Washington DC / Fort Meade corridor, GS-9..11 filter)
         usa_resp = MagicMock()
         usa_resp.json.return_value = {
             "SearchResult": {
@@ -377,6 +377,7 @@ class TestAshbyAndExternalAggregatorClients:
                         "MatchedObjectDescriptor": {
                             "PositionTitle": "Data Scientist",
                             "OrganizationName": "Environmental Protection Agency",
+                            "JobGrade": [{"Code": "GS"}],
                             "PositionLocationDisplay": "Durham, North Carolina",
                             "PositionLocation": [{"LocationName": "Durham, North Carolina"}],
                             "PositionURI": "https://www.usajobs.gov/job/usa-101",
@@ -385,7 +386,13 @@ class TestAshbyAndExternalAggregatorClients:
                                 {"MinimumRange": "95000", "MaximumRange": "128000", "RateIntervalCode": "PA"}
                             ],
                             "QualificationSummary": "1-3 years experience with Python, SQL, and statistical modeling.",
-                            "UserArea": {"Details": {"JobSummary": "EPA RTP Data Scientist role."}},
+                            "UserArea": {
+                                "Details": {
+                                    "JobSummary": "EPA RTP Data Scientist role.",
+                                    "LowGrade": "09",
+                                    "HighGrade": "11",
+                                }
+                            },
                         },
                     },
                     {
@@ -393,6 +400,7 @@ class TestAshbyAndExternalAggregatorClients:
                         "MatchedObjectDescriptor": {
                             "PositionTitle": "Operations Research Analyst",
                             "OrganizationName": "U.S. Cyber Command",
+                            "JobGrade": [{"Code": "GG"}],
                             "PositionLocationDisplay": "Fort George G. Meade, Maryland",
                             "PositionLocation": [{"LocationName": "Fort George G. Meade, Maryland"}],
                             "PositionURI": "https://www.usajobs.gov/job/usa-102",
@@ -401,7 +409,53 @@ class TestAshbyAndExternalAggregatorClients:
                                 {"MinimumRange": "112000", "MaximumRange": "145000", "RateIntervalCode": "PA"}
                             ],
                             "QualificationSummary": "2+ years experience with Python and machine learning.",
-                            "UserArea": {"Details": {"JobSummary": "Fort Meade quantitative analyst role."}},
+                            "UserArea": {
+                                "Details": {
+                                    "JobSummary": "Fort Meade quantitative analyst role.",
+                                    "LowGrade": "12",
+                                    "HighGrade": "13",
+                                }
+                            },
+                        },
+                    },
+                    {
+                        "MatchedObjectId": "usa-103-gs13",
+                        "MatchedObjectDescriptor": {
+                            "PositionTitle": "Data Scientist",
+                            "OrganizationName": "Department of the Treasury",
+                            "JobGrade": [{"Code": "GS"}],
+                            "PositionLocationDisplay": "Washington, District of Columbia",
+                            "PositionLocation": [{"LocationName": "Washington, District of Columbia"}],
+                            "PositionURI": "https://www.usajobs.gov/job/usa-103-gs13",
+                            "PublicationStartDate": "2026-11-01T00:00:00Z",
+                            "QualificationSummary": "GS-13/14 senior role.",
+                            "UserArea": {
+                                "Details": {
+                                    "JobSummary": "Senior GS-13/14 Data Scientist.",
+                                    "LowGrade": "13",
+                                    "HighGrade": "14",
+                                }
+                            },
+                        },
+                    },
+                    {
+                        "MatchedObjectId": "usa-104-gs7",
+                        "MatchedObjectDescriptor": {
+                            "PositionTitle": "Data Scientist",
+                            "OrganizationName": "Bureau of Economic Analysis",
+                            "JobGrade": [{"Code": "GS"}],
+                            "PositionLocationDisplay": "Washington, District of Columbia",
+                            "PositionLocation": [{"LocationName": "Washington, District of Columbia"}],
+                            "PositionURI": "https://www.usajobs.gov/job/usa-104-gs7",
+                            "PublicationStartDate": "2026-11-01T00:00:00Z",
+                            "QualificationSummary": "GS-5/7 entry role.",
+                            "UserArea": {
+                                "Details": {
+                                    "JobSummary": "Entry GS-5/7 Data Scientist.",
+                                    "LowGrade": "05",
+                                    "HighGrade": "07",
+                                }
+                            },
                         },
                     },
                 ]

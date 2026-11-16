@@ -436,6 +436,27 @@ def poll_jsearch_rapidapi(
     return list(deduped.values()), stats
 
 
+def is_allowed_usajobs_gs_grade(desc: Dict[str, Any]) -> bool:
+    """Return True if a USAJOBS item is either non-GS or on the GS scale with open grades overlapping GS-9 to GS-11."""
+    job_grades = [
+        str(g.get("Code") or "").strip().upper()
+        for g in (desc.get("JobGrade") or [])
+        if isinstance(g, dict) and g.get("Code")
+    ]
+    if "GS" not in job_grades:
+        return True
+
+    details = (desc.get("UserArea") or {}).get("Details") or {}
+    low_str = str(details.get("LowGrade") or "").strip()
+    high_str = str(details.get("HighGrade") or "").strip()
+    if not (low_str.isdigit() and high_str.isdigit()):
+        return True
+
+    low_grade = int(low_str)
+    high_grade = int(high_str)
+    return low_grade <= 11 and high_grade >= 9
+
+
 def poll_usajobs(
     api_key: Optional[str] = None,
     user_email: Optional[str] = None,
@@ -478,8 +499,8 @@ def poll_usajobs(
                 "LocationName": "Raleigh, North Carolina",
                 "Radius": "55",
                 "JobCategoryCode": federal_series,
-                "PayGradeLow": "11",
-                "PayGradeHigh": "14",
+                "PayGradeLow": "09",
+                "PayGradeHigh": "11",
                 "HiringPath": federal_hiring_paths,
                 "ResultsPerPage": "100",
             },
@@ -491,8 +512,8 @@ def poll_usajobs(
                 "LocationName": "Washington, District of Columbia",
                 "Radius": "25",
                 "JobCategoryCode": federal_series,
-                "PayGradeLow": "11",
-                "PayGradeHigh": "14",
+                "PayGradeLow": "09",
+                "PayGradeHigh": "11",
                 "HiringPath": federal_hiring_paths,
                 "ResultsPerPage": "100",
             },
@@ -504,20 +525,20 @@ def poll_usajobs(
                 "LocationName": "Fort George G. Meade, Maryland",
                 "Radius": "25",
                 "JobCategoryCode": federal_series,
-                "PayGradeLow": "11",
-                "PayGradeHigh": "14",
+                "PayGradeLow": "09",
+                "PayGradeHigh": "11",
                 "HiringPath": federal_hiring_paths,
                 "ResultsPerPage": "100",
             },
             "is_remote_query": False,
         },
         {
-            "label": "Federal Data Scientist (1560 GS-11..14)",
+            "label": "Federal Data Scientist (1560 GS-9..11)",
             "params": {
                 "Keyword": "Data Scientist",
                 "JobCategoryCode": "1560;1550;2210;1515;0132",
-                "PayGradeLow": "11",
-                "PayGradeHigh": "14",
+                "PayGradeLow": "09",
+                "PayGradeHigh": "11",
                 "ResultsPerPage": "100",
             },
             "is_remote_query": False,
@@ -526,8 +547,8 @@ def poll_usajobs(
             "label": "Federal AI / Machine Learning / ETL",
             "params": {
                 "Keyword": "Machine Learning Data Engineer Python",
-                "PayGradeLow": "11",
-                "PayGradeHigh": "14",
+                "PayGradeLow": "09",
+                "PayGradeHigh": "11",
                 "ResultsPerPage": "100",
             },
             "is_remote_query": False,
@@ -551,6 +572,8 @@ def poll_usajobs(
                 matched_count = 0
                 for item in raw_items:
                     desc = item.get("MatchedObjectDescriptor") or {}
+                    if not is_allowed_usajobs_gs_grade(desc):
+                        continue
                     title = (desc.get("PositionTitle") or "").strip()
                     company = (
                         desc.get("OrganizationName")
