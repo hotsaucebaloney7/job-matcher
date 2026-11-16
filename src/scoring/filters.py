@@ -459,3 +459,69 @@ def format_posting_age(
     if days <= 60:
         return f"{days}d ago (30d+)"
     return f"{days}d ago (Evergreen)"
+
+
+DIRECT_EMPLOYER_SOURCES = {"workday", "usajobs", "greenhouse", "lever", "ashby", "xml_feed"}
+
+DEFENSE_FEDERAL_COMPANY_PATTERN = re.compile(
+    r"\b(?:booz\s+allen|leidos|caci|general\s+dynamics|gdit|guidehouse|northrop\s+grumman|"
+    r"mitre|rti\s+international|saic|peraton|parsons|mantech|serco|palantir|anduril|"
+    r"shield\s+ai|draper|rand\b|customs\s+and\s+border|farm\s+credit|national\s+geospatial|"
+    r"central\s+intelligence|defense\s+counterintelligence|department\s+of|internal\s+revenue|"
+    r"federal|u\.s\.\s+army|navy|air\s+force)\b",
+    re.IGNORECASE,
+)
+
+LOW_ODDS_STAFFING_COMPANY_PATTERN = re.compile(
+    r"\b(?:infosys|bmr\s+infotek|opendatajobs|lemon\.io|ica\s*,?\s*inc|ex\s+parte|"
+    r"nityo\s+infotech|stellar\s+professionals|ampcus|bearcloud|irvine\s+technology)\b",
+    re.IGNORECASE,
+)
+
+
+def classify_priority_tier(
+    source: Optional[str],
+    company: Optional[str],
+    title: Optional[str],
+    match_score: Optional[float],
+    date_posted: Optional[datetime],
+    reference_date: Optional[datetime] = None,
+) -> str:
+    """Classify a posting into 'Tier 1', 'Tier 2', or 'Tier 3' based on interview conversion likelihood."""
+    src = (source or "").strip().lower()
+    comp = (company or "").strip()
+    ttl = (title or "").strip()
+    score = float(match_score or 0.0)
+
+    if date_posted is not None:
+        dt = date_posted
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        ref = reference_date or datetime.now(timezone.utc).replace(tzinfo=None)
+        if ref.tzinfo is not None:
+            ref = ref.astimezone(timezone.utc).replace(tzinfo=None)
+        age_days = max(0, (ref - dt).days)
+    else:
+        age_days = 0
+
+    # 1. Tier 3: Evergreen (>60d) or third-party staffing/broad aggregators
+    if age_days > 60:
+        return "Tier 3"
+    if src in {"adzuna", "remotive", "themuse"} or LOW_ODDS_STAFFING_COMPANY_PATTERN.search(comp):
+        return "Tier 3"
+    if "open continuous" in ttl.lower():
+        return "Tier 2"
+
+    is_direct = src in DIRECT_EMPLOYER_SOURCES
+    is_def_fed = bool(DEFENSE_FEDERAL_COMPANY_PATTERN.search(comp))
+
+    # 2. Tier 1: Fresh (<=14d) direct federal/defense or high-scoring defense contractor
+    if is_direct and age_days <= 14 and score >= 67.0:
+        return "Tier 1"
+    if is_def_fed and age_days <= 14 and score >= 85.0:
+        return "Tier 1"
+
+    # 3. Tier 2: Everything else (15-60d direct defense/public-sector or fresh local tech)
+    if score >= 66.0:
+        return "Tier 2"
+    return "Tier 3"

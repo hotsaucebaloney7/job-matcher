@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from src.db.models import JobPosting
 from src.exporters.markdown_digest import format_salary_range
-from src.scoring.filters import format_location_tag, format_posting_age
+from src.scoring.filters import classify_priority_tier, format_location_tag, format_posting_age
 
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
@@ -104,6 +104,15 @@ def _ensure_database_schema(
             "Keyword Score": {"number": {"format": "number"}},
             "Semantic Score": {"number": {"format": "number"}},
             "Experience Tier": {"select": {}},
+            "Priority": {
+                "select": {
+                    "options": [
+                        {"name": "Tier 1", "color": "green"},
+                        {"name": "Tier 2", "color": "default"},
+                        {"name": "Tier 3", "color": "gray"},
+                    ]
+                }
+            },
             "Workplace": {
                 "select": {
                     "options": [
@@ -217,6 +226,17 @@ def sync_to_notion(
                         "Keyword Score": {"number": round(float(row.keyword_score or 0.0), 1)},
                         "Semantic Score": {"number": round(float(row.semantic_score or 0.0), 1)},
                         "Experience Tier": {"select": {"name": exp_tier}},
+                        "Priority": {
+                            "select": {
+                                "name": classify_priority_tier(
+                                    source=row.source,
+                                    company=row.company,
+                                    title=row.title,
+                                    match_score=row.match_score,
+                                    date_posted=row.date_posted,
+                                )
+                            }
+                        },
                         "Status": {"select": {"name": "New Match"}},
                         "Salary": {"rich_text": [{"text": {"content": salary_str}}]},
                         "Posted Age": {"rich_text": [{"text": {"content": format_posting_age(row.date_posted)}}]},
