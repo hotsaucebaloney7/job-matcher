@@ -108,7 +108,7 @@ def _ensure_database_schema(
                 "select": {
                     "options": [
                         {"name": "Tier 1", "color": "green"},
-                        {"name": "Tier 2", "color": "default"},
+                        {"name": "Tier 2", "color": "yellow"},
                         {"name": "Tier 3", "color": "gray"},
                     ]
                 }
