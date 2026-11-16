@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from src.db.models import JobPosting
 from src.db.session import get_session_factory, init_db
-from src.scoring.filters import format_location_tag
+from src.scoring.filters import classify_priority_tier, format_location_tag
 from src.exporters.notion_sync import (
     NOTION_DATABASE_URL,
     NOTION_VERSION,
@@ -119,6 +119,7 @@ def fetch_want_to_apply_jobs(
             url_prop = str((props.get("URL") or {}).get("url") or "").strip()
             score_prop = (props.get("Match Score") or {}).get("number")
             workplace_prop = ((props.get("Workplace") or {}).get("select") or {}).get("name") or "Remote"
+            priority_prop = ((props.get("Priority") or {}).get("select") or {}).get("name") or ""
 
             # Correlate with MySQL JobPosting row via notion_page_id (dashed or undashed) or URL
             conditions = []
@@ -141,6 +142,13 @@ def fetch_want_to_apply_jobs(
                 exp_tier = str(mk.get("experience_tier") or "Unspecified (Target)")
                 resolved_url = db_row.url or url_prop
                 req_id = extract_requisition_id(external_id=db_row.external_id, url=resolved_url)
+                priority_tier = priority_prop or classify_priority_tier(
+                    source=db_row.source,
+                    company=db_row.company,
+                    title=db_row.title,
+                    match_score=db_row.match_score,
+                    date_posted=db_row.date_posted,
+                )
 
                 results.append(
                     {
@@ -148,6 +156,7 @@ def fetch_want_to_apply_jobs(
                         "job_hash": db_row.job_hash,
                         "external_id": db_row.external_id or "",
                         "req_id": req_id,
+                        "priority_tier": priority_tier,
                         "company": db_row.company or company_prop or "Unknown Company",
                         "title": db_row.title or raw_title or "Target Role",
                         "workplace_type": db_row.workplace_type or workplace_prop,
@@ -176,6 +185,7 @@ def fetch_want_to_apply_jobs(
                         "job_hash": None,
                         "external_id": "",
                         "req_id": req_id,
+                        "priority_tier": priority_prop or "Tier 2",
                         "company": company or "Unknown Company",
                         "title": title or "Target Role",
                         "workplace_type": workplace_prop,
@@ -194,6 +204,8 @@ def fetch_want_to_apply_jobs(
         if own_http:
             client.close()
 
+    # Sort identically to the Notion 'Want to Apply' column: Priority (Tier 1 -> Tier 2 -> Tier 3), then Match Score DESC
+    results.sort(key=lambda j: (j.get("priority_tier") or "Tier 9", -float(j.get("match_score") or 0.0)))
     return results
 
 
@@ -741,6 +753,10 @@ def find_existing_tailored_resume(
                         # If req_low matches the suffix of this folder inside the matching company folder, return immediately!
                         if req_low and entry.name.lower() == company_slug and sub.name.lower().endswith(f"_{req_low}"):
                             return target_file
+                        # If both the incoming job and this nested subfolder have requisition suffixes that differ, do not treat this subfolder as a fuzzy candidate
+                        sub_req_match = re.search(r"_([A-Za-z0-9-]+)$", sub.name)
+                        if req_low and sub_req_match and sub_req_match.group(1).lower() != req_low:
+                            continue
                         combined_name = f"{entry.name}_{sub.name}"
                         candidates.append((combined_name, combined_name.lower(), target_file, True))
         elif entry.is_file():
@@ -803,6 +819,7 @@ def process_want_to_apply_queue(
     gemini_api_key: Optional[str] = None,
     update_notion_pages: bool = True,
     force_regenerate: bool = False,
+    limit: Optional[int] = None,
     console: Optional[Console] = None,
     http_session: Optional[requests.Session] = None,
 ) -> Dict[str, Any]:
@@ -851,6 +868,9 @@ def process_want_to_apply_queue(
             skipped_existing.append(job)
         else:
             pending_jobs.append(job)
+
+    if limit is not None and limit > 0:
+        pending_jobs = pending_jobs[:limit]
 
     if console and skipped_existing:
         for sjob in skipped_existing:
@@ -939,7 +959,31 @@ def process_want_to_apply_queue(
 
 
 def main() -> None:
-    """CLI entrypoint to process all 'Want to Apply' jobs from Notion."""
+    """CLI entrypoint to process 'Want to Apply' jobs from Notion (or just the top untailored job with --next)."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Process Notion 'Want to Apply' queue for resume tailoring.")
+    parser.add_argument(
+        "--next",
+        "--top",
+        action="store_true",
+        dest="top_only",
+        help="Only process the #1 top-priority untailored job in the 'Want to Apply' queue.",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Maximum number of untailored jobs to process.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Force regenerate even if an existing tailored resume is found.",
+    )
+    args, _ = parser.parse_known_args()
+    resolved_limit = 1 if args.top_only else args.limit
+
     console = Console()
     console.print("[bold cyan]Scanning Notion 'Want to Apply' Queue for Argon Resume Tailoring...[/bold cyan]")
 
@@ -947,7 +991,12 @@ def main() -> None:
     SessionLocal = get_session_factory(engine)
 
     with SessionLocal() as session:
-        result = process_want_to_apply_queue(session=session, console=console)
+        result = process_want_to_apply_queue(
+            session=session,
+            limit=resolved_limit,
+            force_regenerate=args.force,
+            console=console,
+        )
 
     if result["jobs_found"] == 0:
         console.print(

@@ -20,11 +20,15 @@ Use this skill whenever the user asks to tailor their resume for jobs in their N
 
 1. **Refresh the Notion `'Want to Apply'` Queue & Check for Existing Business / Position Folders (with Requisition Numbers):**
    - First, inspect `data/tailored/` to see which business/position subfolders **already contain `EngelhardtJoshuaResume.docx`** (grouped by business with requisition number: `data/tailored/<Company_Slug>/<Title_Slug>_<Req_ID>/EngelhardtJoshuaResume.docx`).
-   - Run the queue processor:
+   - **If the user asks for the "next" or "top" resume** (e.g., *"do the next resume"*, *"tailor the top resume"*, *"next resume in want to apply"*), run with `--next` so it grabs **only the #1 highest-priority untailored job** (`Priority`: `Tier 1` $\rightarrow$ `Tier 2` $\rightarrow$ `Tier 3`, then highest `Match Score`):
+     ```powershell
+     C:\Users\jenge\anaconda3\envs\job-matcher\python.exe -m src.exporters.resume_tailor --next
+     ```
+   - Otherwise, to scan the full untailored queue, run:
      ```powershell
      C:\Users\jenge\anaconda3\envs\job-matcher\python.exe -m src.exporters.resume_tailor
      ```
-     Note: `process_want_to_apply_queue()` automatically checks `find_existing_tailored_resume(company, title, req_id=..., external_id=..., url=...)` across `data/tailored/<Company_Slug>/<Title_Slug>_<Req_ID>/` subfolders and **skips** any `'Want to Apply'` card that already has `EngelhardtJoshuaResume.docx` inside its folder unless the user explicitly asks to tailor/regenerate that specific posting.
+     Note: `process_want_to_apply_queue()` sorts by `Priority` (`Tier 1` $\rightarrow$ `Tier 2` $\rightarrow$ `Tier 3`) then `Match Score` descending, automatically checks `find_existing_tailored_resume(company, title, req_id=..., external_id=..., url=...)` across `data/tailored/<Company_Slug>/<Title_Slug>_<Req_ID>/` subfolders, and **skips** any `'Want to Apply'` card that already has `EngelhardtJoshuaResume.docx` inside its folder unless the user explicitly asks to tailor/regenerate that specific posting.
    - If the user explicitly names a posting that was already skipped (or asks to redo it), you can read the job's details directly from MySQL or run `process_want_to_apply_queue(..., force_regenerate=True)`.
 
 2. **Never Recreate an Existing Tailored Resume in Batch Mode Unless Explicitly Asked:**
