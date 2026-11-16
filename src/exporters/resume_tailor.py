@@ -148,6 +148,7 @@ def fetch_want_to_apply_jobs(
                     title=db_row.title,
                     match_score=db_row.match_score,
                     date_posted=db_row.date_posted,
+                    experience_tier=exp_tier,
                 )
 
                 results.append(

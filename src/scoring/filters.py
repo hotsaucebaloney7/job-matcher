@@ -119,33 +119,66 @@ EXPERIENCE_IGNORE_CONTEXT = re.compile(
 DEFAULT_MAX_EXPERIENCE_YEARS = 5
 
 
-def extract_min_years_experience(description_text: Optional[str]) -> Optional[int]:
-    """Extract the minimum required years of experience from a job description.
+GRADUATE_DEGREE_OFFSET_PATTERN = re.compile(
+    r"\b(?:m\.?s\.?|master'?s?|ph\.?d\.?|doctorate|graduate\s+degree|advanced\s+degree)\b",
+    re.IGNORECASE,
+)
+BACHELOR_DEGREE_LINE_PATTERN = re.compile(
+    r"\b(?:b\.?s\.?|b\.?a\.?|bachelor'?s?|undergraduate)\b",
+    re.IGNORECASE,
+)
 
-    When a posting lists alternative degree tiers (e.g. '5+ years with BS or 3+ years with MS'),
-    or multiple skill durations, returns the minimum general requirement in [1, 15].
-    Returns None if no explicit years-of-experience requirement is found.
+
+def extract_min_years_experience(description_text: Optional[str]) -> Optional[int]:
+    """Extract the effective required years of experience from a job description.
+
+    - Within a single line, if a Master's/PhD degree offset is mentioned (e.g. '5+ years with BS
+      or 3+ years with MS'), uses the lower Master's requirement; otherwise uses the max on that line
+      so sub-skill clauses ('5+ years BI experience, with 3+ years Grafana') don't mask the headline requirement.
+    - Across multiple qualification bullets, takes the maximum required years across general/technical
+      bullets (while allowing an explicit Master's degree line to offset a Bachelor's degree line).
     """
     if not description_text:
         return None
 
-    found_years: list[int] = []
+    general_years: list[int] = []
+    bachelor_only_years: list[int] = []
+    grad_offset_years: list[int] = []
+
     for line in description_text.splitlines():
         if EXPERIENCE_IGNORE_CONTEXT.search(line):
             continue
+        line_years: list[int] = []
         for pattern in EXPERIENCE_PATTERNS:
             for match in pattern.finditer(line):
                 try:
                     yrs = int(match.group(1))
                 except (ValueError, IndexError):
                     continue
-                # Reasonable candidate experience requirement bounds (1 to 15 years)
                 if 1 <= yrs <= 15:
-                    found_years.append(yrs)
+                    line_years.append(yrs)
+        if not line_years:
+            continue
 
-    if not found_years:
+        has_grad = bool(GRADUATE_DEGREE_OFFSET_PATTERN.search(line))
+        has_bach = bool(BACHELOR_DEGREE_LINE_PATTERN.search(line))
+
+        if has_grad:
+            grad_offset_years.append(min(line_years))
+        elif has_bach:
+            bachelor_only_years.append(max(line_years))
+        else:
+            general_years.append(max(line_years))
+
+    effective_candidates: list[int] = list(general_years)
+    if grad_offset_years:
+        effective_candidates.append(min(grad_offset_years))
+    elif bachelor_only_years:
+        effective_candidates.append(max(bachelor_only_years))
+
+    if not effective_candidates:
         return None
-    return min(found_years)
+    return max(effective_candidates)
 
 
 def classify_experience_tier(
@@ -485,12 +518,14 @@ def classify_priority_tier(
     title: Optional[str],
     match_score: Optional[float],
     date_posted: Optional[datetime],
+    experience_tier: Optional[str] = None,
     reference_date: Optional[datetime] = None,
 ) -> str:
     """Classify a posting into 'Tier 1', 'Tier 2', or 'Tier 3' based on interview conversion likelihood."""
     src = (source or "").strip().lower()
     comp = (company or "").strip()
     ttl = (title or "").strip()
+    exp_str = (experience_tier or "").strip()
     score = float(match_score or 0.0)
 
     if date_posted is not None:
@@ -512,16 +547,18 @@ def classify_priority_tier(
     if "open continuous" in ttl.lower():
         return "Tier 2"
 
+    is_stretch = "stretch" in exp_str.lower() or "4+" in exp_str or "5+" in exp_str
     is_direct = src in DIRECT_EMPLOYER_SOURCES
     is_def_fed = bool(DEFENSE_FEDERAL_COMPANY_PATTERN.search(comp))
 
-    # 2. Tier 1: Fresh (<=14d) direct federal/defense or high-scoring defense contractor
-    if is_direct and age_days <= 14 and score >= 67.0:
-        return "Tier 1"
-    if is_def_fed and age_days <= 14 and score >= 85.0:
-        return "Tier 1"
+    # 2. Tier 1: Fresh (<=14d) direct federal/defense or high-scoring defense contractor at Primary (1-3 yr) level
+    if not is_stretch:
+        if is_direct and age_days <= 14 and score >= 67.0:
+            return "Tier 1"
+        if is_def_fed and age_days <= 14 and score >= 85.0:
+            return "Tier 1"
 
-    # 3. Tier 2: Everything else (15-60d direct defense/public-sector or fresh local tech)
+    # 3. Tier 2: Stretch (4-5 yr) roles, 15-60d direct defense/public-sector, or fresh local tech
     if score >= 66.0:
         return "Tier 2"
     return "Tier 3"

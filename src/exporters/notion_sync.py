@@ -234,6 +234,7 @@ def sync_to_notion(
                                     title=row.title,
                                     match_score=row.match_score,
                                     date_posted=row.date_posted,
+                                    experience_tier=exp_tier,
                                 )
                             }
                         },

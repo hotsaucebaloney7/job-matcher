@@ -217,6 +217,16 @@ class TestExperienceExtractionAndTiers:
             ("1-3 years of professional experience building Python pipelines.", 1),
             ("Minimum of 4 years of experience in applied AI.", 4),
             ("5+ years of experience with a BS, or 3+ years of experience with an MS/PhD.", 3),
+            (
+                "Experience: 5+ years of business intelligence development experience, "
+                "with at least 3+ years of experience with Grafana and Power BI.",
+                5,
+            ),
+            (
+                "5+ years of demonstrated professional experience in a Data Science role\n"
+                "2+ years of AI/ML professional experience with production AI systems",
+                5,
+            ),
             ("8+ years of experience in production ML systems.", 8),
             ("For over 25 years, our company has built great products.", None),
             ("Must be at least 18 years of age.", None),
