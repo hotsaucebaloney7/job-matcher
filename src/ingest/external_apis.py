@@ -644,6 +644,20 @@ def poll_usajobs(
                     location_raw = " | ".join(dict.fromkeys(loc_parts))
 
                     details = (desc.get("UserArea") or {}).get("Details") or {}
+                    job_categories = [
+                        str(c.get("Code") or "").strip()
+                        for c in (desc.get("JobCategory") or [])
+                        if isinstance(c, dict) and c.get("Code")
+                    ]
+                    is_series_1560 = "1560" in job_categories
+                    low_str = str(details.get("LowGrade") or "").strip()
+                    high_str = str(details.get("HighGrade") or "").strip()
+                    low_g = int(low_str) if low_str.isdigit() else None
+                    high_g = int(high_str) if high_str.isdigit() else None
+
+                    if is_series_1560 and "data scien" not in title.lower():
+                        title = f"{title} (1560 Data Scientist)"
+
                     summary = details.get("JobSummary") or ""
                     duties = details.get("MajorDuties") or []
                     if isinstance(duties, list):
@@ -653,11 +667,24 @@ def poll_usajobs(
                     quals = desc.get("QualificationSummary") or ""
                     description_text = strip_html(f"{summary}\n{duties_str}\n{quals}")
 
+                    if is_series_1560 and low_g is not None and high_g is not None:
+                        if low_g <= 9 <= high_g:
+                            description_text = (
+                                "[USAJOBS Series 1560 Data Science | Grade: GS-09 (Primary - Auto-Qualify via M.S.)]\n"
+                                f"{description_text}"
+                            )
+                        elif low_g in (10, 11):
+                            description_text = (
+                                "[USAJOBS Series 1560 Data Science | Grade: GS-11 (Stretch)]\n"
+                                f"{description_text}"
+                            )
+
                     passed, workplace_type, job_hash, _ = evaluate_posting(
                         company=company,
                         title=title,
                         location_raw=location_raw,
                         description_text=description_text,
+                        max_experience_years=15 if is_series_1560 else 5,
                         allow_dc_fort_meade=True,
                     )
                     if not passed:

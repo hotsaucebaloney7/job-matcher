@@ -377,6 +377,7 @@ class TestAshbyAndExternalAggregatorClients:
                         "MatchedObjectDescriptor": {
                             "PositionTitle": "Data Scientist",
                             "OrganizationName": "Environmental Protection Agency",
+                            "JobCategory": [{"Code": "1560"}],
                             "JobGrade": [{"Code": "GS"}],
                             "PositionLocationDisplay": "Durham, North Carolina",
                             "PositionLocation": [{"LocationName": "Durham, North Carolina"}],
@@ -468,6 +469,7 @@ class TestAshbyAndExternalAggregatorClients:
         assert usa_jobs[0]["workplace_type"] == "Local"
         assert usa_jobs[0]["salary_min"] == 95000
         assert usa_jobs[0]["salary_max"] == 128000
+        assert "[USAJOBS Series 1560 Data Science | Grade: GS-09" in usa_jobs[0]["description_text"]
         assert usa_jobs[1]["company"] == "U.S. Cyber Command"
         assert usa_jobs[1]["location_raw"] == "Fort George G. Meade, Maryland"
 

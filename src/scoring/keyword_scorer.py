@@ -84,6 +84,24 @@ class KeywordScorer:
         knockout_min = self.experience_rules["hard_knockout_min_years"]
         stretch_penalty = self.experience_rules["stretch_penalty_points"]
 
+        text = description_text or ""
+        if "[USAJOBS Series 1560 Data Science | Grade: GS-09" in text:
+            return {
+                "min_years_required": 0,
+                "experience_tier": "GS-9 (Primary - M.S.)",
+                "experience_penalty": 0.0,
+                "experience_knockout": False,
+                "auto_include_1560": True,
+            }
+        if "[USAJOBS Series 1560 Data Science | Grade: GS-11 (Stretch)]" in text:
+            return {
+                "min_years_required": 3,
+                "experience_tier": "GS-11 (Stretch)",
+                "experience_penalty": stretch_penalty,
+                "experience_knockout": False,
+                "auto_include_1560": True,
+            }
+
         min_years = extract_min_years_experience(description_text)
         tier_label = classify_experience_tier(
             min_years,
@@ -139,8 +157,10 @@ class KeywordScorer:
         unfair_advantage_boost = round(
             sum(v for k, v in tier_scores.items() if str(k).startswith("federal_")), 2
         )
-        final_score = round(min(max(total_score, 0.0), 100.0), 2)
         exp_info = self.evaluate_experience(text, title=title)
+        if exp_info.get("auto_include_1560"):
+            total_score = max(total_score, 85.0)
+        final_score = round(min(max(total_score, 0.0), 100.0), 2)
         breakdown: Dict[str, Any] = {
             "tier_scores": tier_scores,
             "unfair_advantage_boost": unfair_advantage_boost,

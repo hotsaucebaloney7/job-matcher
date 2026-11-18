@@ -386,12 +386,15 @@ def score_unscored_postings(
         else:
             penalty = float(breakdown.get("experience_penalty") or 0.0)
             is_snippet = row.source == "adzuna" and 0 < len(desc_body) <= 600
-            row.match_score = compute_composite_score(
+            comp_score = compute_composite_score(
                 kw_score,
                 sem_score,
                 experience_penalty=penalty,
                 is_snippet=is_snippet,
             )
+            if breakdown.get("auto_include_1560"):
+                comp_score = max(comp_score, 68.0)
+            row.match_score = comp_score
             if row.status == "rejected":
                 row.status = "new"
 
