@@ -130,8 +130,21 @@ tiers:
         - financial crime
         - tax evasion
         - anti-money laundering
+        - aml
         - illicit finance
         - law enforcement
+        - crime analyst
+        - crime analytics
+        - criminal intelligence
+        - osint
+        - digital forensics
+        - blockchain analytics
+        - fincen
+        - suspicious activity
+        - nibrs
+        - cad/rms
+        - link analysis
+        - fraud analytics
 
   federal_tier_2_boost:
     name: "Federal Tier 2 Boost: Public Mission, ETL & Applied ML"

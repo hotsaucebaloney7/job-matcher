@@ -12,20 +12,46 @@ from bs4 import BeautifulSoup
 
 WorkplaceType = Literal["Remote", "Local", "Hybrid"]
 
-# 1. Excluded seniority / management / intern prefixes & tokens (word-boundary matched)
+# 1. Excluded seniority / management / intern / sworn-patrol prefixes & tokens (word-boundary matched)
 EXCLUDED_TITLE_PATTERN = re.compile(
-    r"\b(?:staff|principal|director|vp|vice\s+president|head\s+of|chief|supervisory|intern|internship|lead|manager)\b",
+    r"\b(?:staff|principal|director|vp|vice\s+president|head\s+of|chief|supervisory|intern|internship|lead|manager|"
+    r"police\s+officer|patrol\s+officer|deputy\s+sheriff|sheriff'?s?\s+deputy|special\s+agent|"
+    r"criminal\s+investigator|correctional\s+officer|detention\s+officer|border\s+patrol\s+agent|"
+    r"state\s+trooper|trooper|detective|marshal|bailiff|911\s+telecommunicator|sworn\s+officer)\b",
     re.IGNORECASE,
 )
 
-# 2. Target role families (Primary + Accepted Variations + Federal Quantitative/Intelligence + Energy/Quant Series)
+# 2. Target role families (Primary + Accepted Variations + Federal/LE Analytical + Energy/Quant Series)
 TARGET_TITLE_PATTERN = re.compile(
     r"(?:data\s+scien|ai\s+engineer|artificial\s+intelligence|machine\s+learning|"
     r"ml\s+engineer|applied\s+ai|data\s+engineer|etl\s+developer|etl\s+engineer|"
     r"ml\s*ops|genai|generative\s+ai|operations\s+research\s+analyst|statistician|"
-    r"intelligence\s+analyst|cyber\s+data\s+scientist|quantitative\s+analyst|"
-    r"quant(?:itative)?\s+research|quantitative\s+developer|analytics\s+engineer|"
+    r"intelligence\s+analyst|intelligence\s+research\s+specialist|cyber\s+data\s+scientist|"
+    r"crime\s+analyst|criminal\s+intelligence\s+analyst|investigative\s+analyst|"
+    r"real[- ]time\s+crime\s+center\s+analyst|digital\s+forensics?\s+(?:analyst|engineer|specialist)|"
+    r"(?:financial\s+crimes?|aml|fraud)\s+(?:data\s+scien|analyst)|"
+    r"quantitative\s+analyst|quant(?:itative)?\s+research|quantitative\s+developer|analytics\s+engineer|"
     r"load\s+forecast|power\s+markets?\s+analyst|energy\s+data\s+scien)",
+    re.IGNORECASE,
+)
+
+# 2b. Broad investigative/crime analyst titles that require at least one technical/analytical signal in the JD
+# so non-technical clerical or manual-only roles are excluded.
+BROAD_ANALYTICAL_TITLE_PATTERN = re.compile(
+    r"\b(?:crime\s+analyst|criminal\s+intelligence\s+analyst|investigative\s+analyst|"
+    r"intelligence\s+analyst|intelligence\s+research\s+specialist|real[- ]time\s+crime\s+center\s+analyst|"
+    r"(?:financial\s+crimes?|aml|fraud)\s+analyst)\b",
+    re.IGNORECASE,
+)
+CORE_TECHNICAL_TITLE_PATTERN = re.compile(
+    r"(?:data\s+scien|data\s+engineer|machine\s+learning|ai\s+engineer|ml\s+engineer|"
+    r"software|quantitative|analytics\s+engineer|digital\s+forensics?)",
+    re.IGNORECASE,
+)
+TECHNICAL_ANALYST_SIGNAL_PATTERN = re.compile(
+    r"\b(?:python|sql|postgresql|mysql|gis|arcgis|qgis|power\s*bi|tableau|palantir|"
+    r"link\s+analysis|machine\s+learning|data\s+analysis|statistical|database|etl|"
+    r"blockchain|osint|spss|sas|excel\s+macros|vba|r\s+programming|r\s+studio|data\s+visualization)\b",
     re.IGNORECASE,
 )
 
@@ -362,6 +388,18 @@ def evaluate_posting(
         return False, None, None, f"Location rejected ({location_raw!r})"
 
     if description_text:
+        if (
+            BROAD_ANALYTICAL_TITLE_PATTERN.search(title)
+            and not CORE_TECHNICAL_TITLE_PATTERN.search(title)
+            and not TECHNICAL_ANALYST_SIGNAL_PATTERN.search(description_text)
+        ):
+            return (
+                False,
+                None,
+                None,
+                "Broad analyst title lacks technical/analytical skills (Python/SQL/GIS/BI/Palantir/OSINT)",
+            )
+
         if workplace_type == "Remote" and has_non_local_onsite_requirement(description_text):
             return (
                 False,
@@ -579,6 +617,29 @@ COMMODITY_QUANT_TEXT_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
+LAW_ENFORCEMENT_COMPANY_PATTERN = re.compile(
+    r"\b(?:federal\s+bureau\s+of\s+investigation|\bfbi\b|drug\s+enforcement\s+administration|\bdea\b|"
+    r"bureau\s+of\s+alcohol,\s*tobacco|\batf\b|u\.s\.\s+marshals|marshals\s+service|"
+    r"homeland\s+security\s+investigations|\bhsi\b|customs\s+and\s+border(?:\s+protection)?|\bcbp\b|"
+    r"secret\s+service|\busss\b|internal\s+revenue\s+service|\birs\b|"
+    r"financial\s+crimes\s+enforcement\s+network|\bfincen\b|office\s+of\s+inspector\s+general|"
+    r"department\s+of\s+justice|\bdoj\b|state\s+bureau\s+of\s+investigation|\bnc\s+sbi\b|"
+    r"police\s+department|sheriff'?s?\s+office|department\s+of\s+public\s+safety|"
+    r"axon|flock\s+safety|chainalysis|trm\s+labs|elliptic|cellebrite|babel\s+street|"
+    r"recorded\s+future|motorola\s+solutions|soundthinking|penlink|lexisnexis\s+risk)\b",
+    re.IGNORECASE,
+)
+
+LAW_ENFORCEMENT_TEXT_PATTERN = re.compile(
+    r"\b(?:law\s+enforcement|criminal\s+investigation|crime\s+analyst|crime\s+analytics|"
+    r"criminal\s+intelligence|real[- ]time\s+crime\s+center|\bnibrs\b|cad/rms|"
+    r"digital\s+forensics?|blockchain\s+analytics|anti[- ]money\s+laundering|\baml\b|"
+    r"financial\s+crimes?|illicit\s+finance|\bfincen\b|suspicious\s+activity\s+report|"
+    r"cyber\s+crimes?\s+center|police\s+department|sheriff'?s?\s+office|homeland\s+security\s+investigations|"
+    r"department\s+of\s+justice|\bfbi\b|\birs-ci\b)\b",
+    re.IGNORECASE,
+)
+
 DEFENSE_FEDERAL_COMPANY_PATTERN = re.compile(
     r"\b(?:booz\s+allen|leidos|caci|general\s+dynamics|gdit|guidehouse|northrop\s+grumman|"
     r"mitre|rti\s+international|saic|peraton|parsons|mantech|serco|palantir|anduril|"
@@ -601,7 +662,7 @@ def classify_sector(
     description_text: Optional[str] = None,
     source: Optional[str] = None,
 ) -> str:
-    """Classify a posting into one of 4 Notion Sector tags: Nuclear / Energy, Commodity / Quant, Defense / Federal, or Tech."""
+    """Classify a posting into one of 5 Notion Sector tags: Law Enforcement, Nuclear / Energy, Commodity / Quant, Defense / Federal, or Tech."""
     comp = (company or "").strip()
     ttl = (title or "").strip()
     desc = (description_text or "")[:3000]
@@ -612,10 +673,14 @@ def classify_sector(
         return "Nuclear / Energy"
     if COMMODITY_QUANT_COMPANY_PATTERN.search(comp):
         return "Commodity / Quant"
+    if LAW_ENFORCEMENT_COMPANY_PATTERN.search(comp):
+        return "Law Enforcement"
     if COMMODITY_QUANT_TEXT_PATTERN.search(f"{ttl} {desc}"):
         return "Commodity / Quant"
     if NUCLEAR_ENERGY_TEXT_PATTERN.search(f"{ttl} {desc}"):
         return "Nuclear / Energy"
+    if LAW_ENFORCEMENT_TEXT_PATTERN.search(f"{ttl} {desc}"):
+        return "Law Enforcement"
     if src == "usajobs" or DEFENSE_FEDERAL_COMPANY_PATTERN.search(comp):
         return "Defense / Federal"
     if re.search(r"\b(?:ts/sci|top\s+secret|secret\s+clearance|dod|federal\s+government|ffrdc)\b", combined, re.IGNORECASE):
@@ -664,6 +729,7 @@ def classify_priority_tier(
         DEFENSE_FEDERAL_COMPANY_PATTERN.search(comp)
         or NUCLEAR_ENERGY_COMPANY_PATTERN.search(comp)
         or COMMODITY_QUANT_COMPANY_PATTERN.search(comp)
+        or LAW_ENFORCEMENT_COMPANY_PATTERN.search(comp)
     )
 
     # 2. Tier 1: Fresh (<=14d) direct federal/defense/nuclear/commodity or high-scoring target org at Primary (1-3 yr) level

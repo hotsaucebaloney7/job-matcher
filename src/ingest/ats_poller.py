@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 import time
 from typing import Any, Dict, List, Optional, Sequence, Tuple
@@ -24,7 +25,7 @@ from src.scoring.filters import (
 DEFAULT_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config" / "companies.yaml"
 REQUEST_TIMEOUT_SECONDS = 15
 USER_AGENT = "JobMatcher/1.0 (+local-personal-job-search)"
-WORKDAY_SEARCH_TERMS = ("Data Scientist", "Data Engineer", "Machine Learning", "AI Engineer")
+WORKDAY_SEARCH_TERMS = ("Data Scientist", "Data Engineer", "Machine Learning", "AI Engineer", "Intelligence Analyst")
 
 
 def load_companies_config(config_path: Path = DEFAULT_CONFIG_PATH) -> Dict[str, List[Dict[str, str]]]:
@@ -377,11 +378,12 @@ def parse_xml_job_feed(
     company_name: str,
     default_location: str = "Remote - US",
 ) -> Tuple[List[Dict[str, Any]], int]:
-    """Parse a compliant RSS `<item>` or XML Sitemap `<url>` feed and apply knockout filters."""
-    if not xml_text or not xml_text.strip():
+    """Parse a compliant RSS `<item>` (including NEOGOV/GovernmentJobs) or XML Sitemap `<url>` feed and apply knockout filters."""
+    cleaned_xml = (xml_text or "").lstrip("\ufeff").strip()
+    if not cleaned_xml:
         return [], 0
 
-    root = ET.fromstring(xml_text.strip())
+    root = ET.fromstring(cleaned_xml)
     matched: List[Dict[str, Any]] = []
     raw_count = 0
 
@@ -399,6 +401,8 @@ def parse_xml_job_feed(
         link = children.get("link") or children.get("loc") or ""
         location_raw = children.get("location") or children.get("city") or default_location
         desc_raw = children.get("description") or children.get("content") or ""
+        department = children.get("department") or ""
+        pub_date_raw = children.get("pubdate") or ""
 
         # If a sitemap <url> only has a <loc> URL without a <title>, infer title from URL slug if possible
         if not title and link:
@@ -410,6 +414,19 @@ def parse_xml_job_feed(
         raw_count += 1
 
         description_text = strip_html(desc_raw)
+        if department:
+            description_text = f"[Department: {department}]\n{description_text}" if description_text else f"[Department: {department}]"
+
+        date_posted: Optional[datetime] = None
+        if pub_date_raw:
+            try:
+                parsed_dt = parsedate_to_datetime(pub_date_raw)
+                if parsed_dt.tzinfo is not None:
+                    parsed_dt = parsed_dt.astimezone(timezone.utc).replace(tzinfo=None)
+                date_posted = parsed_dt
+            except Exception:
+                date_posted = _parse_iso_datetime(pub_date_raw)
+
         passed, workplace_type, job_hash, _ = evaluate_posting(
             company=company_name,
             title=title,
@@ -432,7 +449,7 @@ def parse_xml_job_feed(
                 "salary_max": None,
                 "url": link,
                 "description_text": description_text,
-                "date_posted": None,
+                "date_posted": date_posted,
             }
         )
 
@@ -751,7 +768,8 @@ def poll_all_ats(
             try:
                 resp = session.get(feed_url, timeout=REQUEST_TIMEOUT_SECONDS)
                 resp.raise_for_status()
-                matched, raw_count = parse_xml_job_feed(resp.text, company_name=name, default_location=default_loc)
+                xml_payload = resp.content.decode("utf-8-sig", errors="replace") if getattr(resp, "content", None) else resp.text
+                matched, raw_count = parse_xml_job_feed(xml_payload, company_name=name, default_location=default_loc)
                 for job in matched:
                     deduped.setdefault(job["job_hash"], job)
                 stats.append(

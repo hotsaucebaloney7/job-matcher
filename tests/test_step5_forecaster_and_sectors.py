@@ -16,13 +16,15 @@ from src.analytics.forecaster import (
 from src.db.models import ApplicationEvent, JobPosting
 from src.db.session import get_engine, get_session_factory, init_db, upsert_job_postings
 from src.exporters.notion_sync import sync_notion_board_transitions, undo_last_notion_transition
-from src.ingest.ats_poller import fetch_oracle_hcm_board, fetch_smartrecruiters_board
+from src.ingest.ats_poller import fetch_oracle_hcm_board, fetch_smartrecruiters_board, parse_xml_job_feed
 from src.ingest.external_apis import poll_jooble
 from src.scoring.filters import (
     classify_location,
     classify_sector,
     compute_job_hash,
+    evaluate_posting,
     format_location_tag,
+    is_excluded_title,
     is_target_title,
 )
 from src.scoring.keyword_scorer import KeywordScorer
@@ -293,3 +295,92 @@ class TestNotionTransitionLoggingUndoAndForecaster:
             text = md_path.read_text(encoding="utf-8")
             assert "Nuclear / Energy" in text
             assert "February 14, 2027" in text
+
+
+class TestLawEnforcementExpansion:
+    """Verify analytical-only law enforcement filtering, Law Enforcement sector tag, and NEOGOV RSS parsing."""
+
+    def test_sworn_law_enforcement_roles_are_knocked_out(self) -> None:
+        for title in (
+            "Police Officer",
+            "Deputy Sheriff",
+            "Special Agent (Criminal Investigator)",
+            "Border Patrol Agent",
+            "State Trooper",
+            "Correctional Officer",
+        ):
+            assert is_excluded_title(title), f"Expected sworn title to be excluded: {title}"
+
+    def test_analytical_law_enforcement_titles_and_technical_gate(self) -> None:
+        # Technical Crime Analyst passes
+        passed, wp, _, reason = evaluate_posting(
+            company="City of Raleigh NC",
+            title="Crime Analyst",
+            location_raw="Raleigh, NC",
+            description_text="Analyze NIBRS crime patterns using SQL, Python, and ArcGIS for the Police Department.",
+        )
+        assert passed, reason
+        assert wp == "Local"
+
+        # Non-technical clerical Crime Analyst is rejected by the technical gate
+        passed_non_tech, _, _, reason_non_tech = evaluate_posting(
+            company="City of Raleigh NC",
+            title="Crime Analyst",
+            location_raw="Raleigh, NC",
+            description_text="Answer phones, file paper incident reports, and greet visitors at the front desk.",
+        )
+        assert not passed_non_tech
+        assert "technical/analytical" in reason_non_tech.lower()
+
+        # Core technical LE roles pass directly
+        passed_aml, _, _, _ = evaluate_posting(
+            company="Chainalysis",
+            title="Financial Crimes Data Scientist",
+            location_raw="Washington, DC",
+            description_text="Build Python and PyTorch models for blockchain analytics and anti-money laundering.",
+        )
+        assert passed_aml
+
+    def test_law_enforcement_sector_classification_across_all_4_varieties(self) -> None:
+        # 1. Federal LE
+        assert classify_sector("Federal Bureau of Investigation", "Intelligence Analyst", "DOJ investigations", "usajobs") == "Law Enforcement"
+        assert classify_sector("Customs and Border Protection", "Data Scientist", "DHS analytics", "usajobs") == "Law Enforcement"
+        # 2. State / Local LE
+        assert classify_sector("City of Raleigh NC", "Crime Analyst", "[Department: Police Department]\nSQL and GIS crime analytics", "xml_feed") == "Law Enforcement"
+        # 3. LE Tech Vendors
+        assert classify_sector("Axon", "Machine Learning Engineer", "Computer vision for public safety", "greenhouse") == "Law Enforcement"
+        assert classify_sector("Chainalysis", "Data Scientist", "Crypto tracing", "ashby") == "Law Enforcement"
+        assert classify_sector("TRM Labs", "Data Engineer", "Blockchain intelligence", "ashby") == "Law Enforcement"
+        assert classify_sector("Babel Street", "AI Engineer", "OSINT analytics", "greenhouse") == "Law Enforcement"
+        # 4. LE Contractors & Financial Crime / AML
+        assert classify_sector("CACI", "Data Scientist", "Support DHS Cyber Crimes Center digital forensics", "workday") == "Law Enforcement"
+        assert classify_sector("Guidehouse", "Data Scientist", "Anti-money laundering and financial crimes analytics", "workday") == "Law Enforcement"
+
+    def test_neogov_rss_feed_with_bom_department_and_pubdate(self) -> None:
+        neogov_xml = (
+            '\ufeff<?xml version="1.0" encoding="utf-8"?>'
+            '<rss version="2.0" xmlns:joblisting="http://www.neogov.com/namespaces/JobListing">'
+            "<channel><title>City of Raleigh</title>"
+            "<item>"
+            "<guid>https://www.governmentjobs.com/careers/raleighnc/jobs/999</guid>"
+            "<link>https://www.governmentjobs.com/careers/raleighnc/jobs/999</link>"
+            "<title>Crime Analyst</title>"
+            "<pubDate>Tue, 24 Nov 2026 10:00:00 -0500</pubDate>"
+            "<joblisting:department>Police Department</joblisting:department>"
+            "<description>Use SQL, Python, and ArcGIS to perform tactical crime analytics.</description>"
+            "</item>"
+            "<item>"
+            "<guid>https://www.governmentjobs.com/careers/raleighnc/jobs/1000</guid>"
+            "<link>https://www.governmentjobs.com/careers/raleighnc/jobs/1000</link>"
+            "<title>Police Officer</title>"
+            "<description>Sworn patrol officer duties.</description>"
+            "</item>"
+            "</channel></rss>"
+        )
+        matched, raw_count = parse_xml_job_feed(neogov_xml, company_name="City of Raleigh NC", default_location="Raleigh, NC")
+        assert raw_count == 2
+        assert len(matched) == 1
+        assert matched[0]["title"] == "Crime Analyst"
+        assert "[Department: Police Department]" in matched[0]["description_text"]
+        assert matched[0]["date_posted"] is not None
+        assert classify_sector(matched[0]["company"], matched[0]["title"], matched[0]["description_text"], "xml_feed") == "Law Enforcement"

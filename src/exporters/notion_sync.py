@@ -123,6 +123,7 @@ def _ensure_database_schema(
                 "select": {
                     "options": [
                         {"name": "Defense / Federal", "color": "blue"},
+                        {"name": "Law Enforcement", "color": "red"},
                         {"name": "Nuclear / Energy", "color": "green"},
                         {"name": "Commodity / Quant", "color": "purple"},
                         {"name": "Tech", "color": "gray"},

@@ -344,6 +344,22 @@ def poll_jsearch_rapidapi(
                 "date_posted": "month",
             },
         },
+        {
+            "label": "State & Local Law Enforcement Crime / Intelligence Analysts (NC / DMV)",
+            "params": {
+                "query": "Crime Analyst Intelligence Analyst Investigative Analyst police SBI law enforcement in Raleigh Durham Wilmington NC Washington DC Virginia Maryland",
+                "num_pages": "1",
+                "date_posted": "month",
+            },
+        },
+        {
+            "label": "Law Enforcement Tech & Financial Crime / AML Data Science",
+            "params": {
+                "query": "Data Scientist Data Engineer AML Financial Crimes Fraud law enforcement FBI DOJ FinCEN in Washington DC Virginia Maryland NC Remote",
+                "num_pages": "1",
+                "date_posted": "month",
+            },
+        },
     ]
 
     deduped: Dict[str, Dict[str, Any]] = {}
@@ -516,8 +532,8 @@ def poll_usajobs(
     }
 
     # Track 1 Federal Series: 1560 (Data Science), 1550 (Computer Science), 2210 (IT/Data/SecOps),
-    # 1515 (Operations Research), 0132 (Intelligence), plus 1529/1530/0854
-    federal_series = "1560;1550;2210;1515;0132;1529;1530;0854"
+    # 1515 (Operations Research), 0132 (Intelligence), 1805 (Investigative Analysis - civilian), plus 1529/1530/0854
+    federal_series = "1560;1550;2210;1515;0132;1805;1529;1530;0854"
     federal_hiring_paths = "public;vet;direct;fed-competitive;fed-excepted"
 
     queries = [
@@ -588,6 +604,18 @@ def poll_usajobs(
                 "Organization": "DN;NU;CT;FE",
                 "PayGradeLow": "09",
                 "PayGradeHigh": "11",
+                "ResultsPerPage": "100",
+            },
+            "is_remote_query": False,
+        },
+        {
+            "label": "Federal Law Enforcement Analytical (DOJ / DHS / Treasury / FinCEN / IRS-CI)",
+            "params": {
+                "JobCategoryCode": "1560;1550;2210;1515;0132;1805",
+                "Organization": "DJ;HS;TR",
+                "PayGradeLow": "09",
+                "PayGradeHigh": "11",
+                "HiringPath": federal_hiring_paths,
                 "ResultsPerPage": "100",
             },
             "is_remote_query": False,
@@ -806,6 +834,7 @@ def poll_jooble(
         {"label": "Nuclear / Energy Data (NC & Wilmington)", "keywords": "Data Scientist OR Data Engineer nuclear OR energy", "location": "North Carolina"},
         {"label": "Energy & Commodity Quant (DMV)", "keywords": "Data Scientist OR Quantitative Analyst energy OR commodity OR nuclear", "location": "Washington, DC"},
         {"label": "Remote Energy / Power Trading Data", "keywords": "Data Scientist OR Data Engineer nuclear OR power trading OR commodity", "location": "Remote"},
+        {"label": "Law Enforcement / Crime / AML Analytics (NC & DMV)", "keywords": "Crime Analyst OR Intelligence Analyst OR AML Data Scientist law enforcement", "location": "North Carolina"},
     ]
 
     deduped: Dict[str, Dict[str, Any]] = {}

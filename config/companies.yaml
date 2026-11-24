@@ -33,6 +33,13 @@ greenhouse:
     name: Amperon
   - slug: drweng
     name: DRW
+  # Law Enforcement, OSINT & Public Safety Tech (Verified 200 OK)
+  - slug: axon
+    name: Axon
+  - slug: babelstreet
+    name: Babel Street
+  - slug: recordedfuture
+    name: Recorded Future
 
 lever:
   - slug: palantir
@@ -67,6 +74,13 @@ ashby:
     name: Modal
   - slug: radiant
     name: Radiant Nuclear
+  # Financial Crime & Crypto Intelligence Tech (Verified 200 OK)
+  - slug: chainalysis-careers
+    name: Chainalysis
+  - slug: trm-labs
+    name: TRM Labs
+  - slug: elliptic
+    name: Elliptic
 
 smartrecruiters:
   - slug: Vitol
@@ -128,3 +142,29 @@ workday:
     tenant: dukeenergy
     wd_instance: wd1
     site: search
+  # Public Safety & Law Enforcement Tech (Verified 200 OK)
+  - name: Motorola Solutions
+    tenant: motorolasolutions
+    wd_instance: wd5
+    site: Careers
+
+# State & Local GovernmentJobs (NEOGOV) Public RSS Feeds — Crime, Intelligence & Data Analysts
+xml_feeds:
+  - name: City of Raleigh NC
+    url: https://www.governmentjobs.com/SearchEngine/JobsFeed?agency=raleighnc
+    default_location: Raleigh, NC
+  - name: City of Durham NC
+    url: https://www.governmentjobs.com/SearchEngine/JobsFeed?agency=durhamnc
+    default_location: Durham, NC
+  - name: Town of Cary NC
+    url: https://www.governmentjobs.com/SearchEngine/JobsFeed?agency=townofcary
+    default_location: Cary, NC
+  - name: City of Wilmington NC
+    url: https://www.governmentjobs.com/SearchEngine/JobsFeed?agency=wilmingtonnc
+    default_location: Wilmington, NC
+  - name: Fairfax County VA
+    url: https://www.governmentjobs.com/SearchEngine/JobsFeed?agency=fairfaxcounty
+    default_location: Fairfax, VA
+  - name: District of Columbia Government
+    url: https://www.governmentjobs.com/SearchEngine/JobsFeed?agency=dc
+    default_location: Washington, DC
