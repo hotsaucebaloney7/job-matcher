@@ -61,9 +61,43 @@ class JobPosting(Base):
         index=True,
     )
     notion_page_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    sector: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    notion_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True, index=True)
+    date_applied: Mapped[Optional[datetime]] = mapped_column(DATETIME, nullable=True)
+    date_outcome: Mapped[Optional[datetime]] = mapped_column(DATETIME, nullable=True)
 
     def __repr__(self) -> str:
         return (
             f"<JobPosting(job_hash={self.job_hash[:8]!r}, company={self.company!r}, "
             f"title={self.title!r}, workplace_type={self.workplace_type!r}, match_score={self.match_score})>"
+        )
+
+
+class ApplicationEvent(Base):
+    """Immutable audit log of Notion board status transitions for offer forecasting & undo."""
+
+    __tablename__ = "application_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_hash: Mapped[Optional[str]] = mapped_column(CHAR(64), nullable=True, index=True)
+    notion_page_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    company: Mapped[str] = mapped_column(String(128), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    from_status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    to_status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    event_at: Mapped[datetime] = mapped_column(
+        DATETIME,
+        nullable=False,
+        default=datetime.utcnow,
+        index=True,
+    )
+    priority_tier: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    sector: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    match_score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    def __repr__(self) -> str:
+        return (
+            f"<ApplicationEvent(id={self.id}, company={self.company!r}, "
+            f"{self.from_status!r}->{self.to_status!r} at {self.event_at})>"
         )

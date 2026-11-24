@@ -4,18 +4,24 @@ from __future__ import annotations
 
 import os
 import re
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
 import requests
 from dotenv import load_dotenv
 from rich.console import Console
-from sqlalchemy import select
+from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import Session
 
-from src.db.models import JobPosting
+from src.db.models import ApplicationEvent, JobPosting
 from src.exporters.markdown_digest import format_salary_range
-from src.scoring.filters import classify_priority_tier, format_location_tag, format_posting_age
+from src.scoring.filters import (
+    classify_priority_tier,
+    classify_sector,
+    format_location_tag,
+    format_posting_age,
+)
 
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
@@ -110,6 +116,16 @@ def _ensure_database_schema(
                         {"name": "Tier 1", "color": "green"},
                         {"name": "Tier 2", "color": "yellow"},
                         {"name": "Tier 3", "color": "gray"},
+                    ]
+                }
+            },
+            "Sector": {
+                "select": {
+                    "options": [
+                        {"name": "Defense / Federal", "color": "blue"},
+                        {"name": "Nuclear / Energy", "color": "green"},
+                        {"name": "Commodity / Quant", "color": "purple"},
+                        {"name": "Tech", "color": "gray"},
                     ]
                 }
             },
@@ -236,6 +252,12 @@ def sync_to_notion(
                                     date_posted=row.date_posted,
                                     experience_tier=exp_tier,
                                 )
+                            }
+                        },
+                        "Sector": {
+                            "select": {
+                                "name": row.sector
+                                or classify_sector(row.company, row.title, row.description_text, row.source)
                             }
                         },
                         "Status": {"select": {"name": "New Match"}},
@@ -381,6 +403,7 @@ BOARD_STATUS_ORDER = (
 def update_notion_board_counts_banner(
     api_key: Optional[str] = None,
     database_id: Optional[str] = None,
+    forecast_summary: Optional[str] = None,
     http_session: Optional[requests.Session] = None,
 ) -> Dict[str, int]:
     """Count cards in each Status column and update the top Callout banner above the Notion board."""
@@ -466,17 +489,34 @@ def update_notion_board_counts_banner(
                         "text": {"content": f"{summary_line}\n"},
                         "annotations": {"bold": True, "code": True},
                     },
+                ]
+                if forecast_summary:
+                    rich_text.extend(
+                        [
+                            {
+                                "type": "text",
+                                "text": {"content": "📈 Offer Forecast:   "},
+                                "annotations": {"bold": True},
+                            },
+                            {
+                                "type": "text",
+                                "text": {"content": f"{forecast_summary}\n"},
+                                "annotations": {"bold": True},
+                            },
+                        ]
+                    )
+                rich_text.append(
                     {
                         "type": "text",
                         "text": {
                             "content": (
-                                "⚡ Quick Triage: Set Status = Want to Apply to queue for resume tailoring  •  "
-                                "Set Status = Applied (+ Date Applied & Follow-Up Date) when submitted  •  "
-                                "Set Status = Not Interested to hide from board."
+                                "⚡ Quick Triage: Drag to Want to Apply to queue tailoring  •  "
+                                "Drag to Applied (auto-stamps Date Applied + 7d Follow-Up)  •  "
+                                "Wrong drop? Check '↩️ Recently Moved' tab or run .\\undo_last_move.ps1"
                             )
                         },
-                    },
-                ]
+                    }
+                )
                 if callout_id:
                     client.patch(
                         f"https://api.notion.com/v1/blocks/{callout_id}",
@@ -497,3 +537,317 @@ def update_notion_board_counts_banner(
             client.close()
 
     return counts
+
+
+def _parse_notion_iso(ts: Optional[str]) -> datetime:
+    if not ts:
+        return datetime.utcnow()
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return dt
+    except ValueError:
+        return datetime.utcnow()
+
+
+def _extract_plain_text(prop: Dict[str, Any]) -> str:
+    if not isinstance(prop, dict):
+        return ""
+    for key in ("title", "rich_text"):
+        arr = prop.get(key)
+        if isinstance(arr, list):
+            return "".join(str(x.get("plain_text") or "") for x in arr if isinstance(x, dict)).strip()
+    return ""
+
+
+TRACKED_TRANSITION_STATUSES = {
+    "Want to Apply",
+    "Applied",
+    "Follow Up Needed",
+    "Interviewing",
+    "Offer",
+    "Declined / Rejected",
+    "Not Interested",
+}
+
+
+def sync_notion_board_transitions(
+    session: Session,
+    api_key: Optional[str] = None,
+    database_id: Optional[str] = None,
+    auto_stamp_dates: bool = True,
+    console: Optional[Console] = None,
+    http_session: Optional[requests.Session] = None,
+) -> Dict[str, Any]:
+    """Poll Notion board state, log any column changes into `application_events`, and auto-stamp Applied dates."""
+    resolved_key = (api_key if api_key is not None else os.getenv("NOTION_API_KEY", "")).strip()
+    raw_id = normalize_notion_database_id(
+        database_id if database_id is not None else os.getenv("NOTION_DATABASE_ID", "")
+    )
+    if not (resolved_key and raw_id):
+        return {"scanned": 0, "events_logged": 0, "dates_stamped": 0}
+
+    headers = {
+        "Authorization": f"Bearer {resolved_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": NOTION_VERSION,
+    }
+    own_http = http_session is None
+    client = http_session or requests.Session()
+    scanned = 0
+    events_logged = 0
+    dates_stamped = 0
+
+    try:
+        resolved_db, title_prop = _ensure_database_schema(client, headers, raw_id)
+        has_more = True
+        next_cursor: Optional[str] = None
+
+        while has_more:
+            body: Dict[str, Any] = {"page_size": 100}
+            if next_cursor:
+                body["start_cursor"] = next_cursor
+            q_resp = client.post(
+                f"{NOTION_DATABASE_URL}/{resolved_db}/query",
+                headers=headers,
+                json=body,
+                timeout=20,
+            )
+            if getattr(q_resp, "status_code", 0) != 200:
+                break
+            q_data = q_resp.json() or {}
+            pages = q_data.get("results") or []
+
+            for page in pages:
+                if not isinstance(page, dict) or page.get("archived"):
+                    continue
+                scanned += 1
+                page_id = str(page.get("id") or "")
+                page_id_nodash = page_id.replace("-", "")
+                props = page.get("properties") or {}
+
+                st_sel = (props.get("Status") or {}).get("select") or (props.get("Status") or {}).get("status") or {}
+                current_status = (st_sel.get("name") or "New Match").strip()
+                prio_sel = (props.get("Priority") or {}).get("select") or {}
+                priority_tier = (prio_sel.get("name") or "").strip() or None
+                sec_sel = (props.get("Sector") or {}).get("select") or {}
+                sector_val = (sec_sel.get("name") or "").strip() or None
+                url_prop = str((props.get("URL") or {}).get("url") or "").strip()
+                raw_title = _extract_plain_text(props.get(title_prop) or props.get("Name") or {})
+                company_prop = _extract_plain_text(props.get("Company") or {})
+                score_prop = (props.get("Match Score") or {}).get("number")
+                date_applied_str = ((props.get("Date Applied") or {}).get("date") or {}).get("start")
+                followup_str = ((props.get("Follow-Up Date") or {}).get("date") or {}).get("start")
+                last_edited_dt = _parse_notion_iso(page.get("last_edited_time"))
+
+                # Correlate with MySQL JobPosting
+                conds = []
+                if page_id:
+                    conds.append(JobPosting.notion_page_id == page_id)
+                if page_id_nodash and page_id_nodash != page_id:
+                    conds.append(JobPosting.notion_page_id == page_id_nodash)
+                if url_prop:
+                    conds.append(JobPosting.url == url_prop)
+
+                row: Optional[JobPosting] = None
+                if conds:
+                    row = session.scalars(select(JobPosting).where(or_(*conds)).limit(1)).first()
+
+                # Determine previous status from JobPosting or latest ApplicationEvent
+                prev_status: Optional[str] = None
+                if row is not None:
+                    prev_status = row.notion_status
+                    if not sector_val:
+                        sector_val = row.sector or classify_sector(row.company, row.title, row.description_text, row.source)
+                        row.sector = sector_val
+                else:
+                    last_evt = session.scalars(
+                        select(ApplicationEvent)
+                        .where(ApplicationEvent.notion_page_id == page_id)
+                        .order_by(desc(ApplicationEvent.id))
+                        .limit(1)
+                    ).first()
+                    if last_evt is not None:
+                        prev_status = last_evt.to_status
+
+                # Auto-stamp Date Applied & +7d Follow-Up Date on Notion when moved to Applied without dates
+                if auto_stamp_dates and current_status == "Applied" and not date_applied_str:
+                    applied_day = last_edited_dt.date()
+                    followup_day = applied_day + timedelta(days=7)
+                    patch_props: Dict[str, Any] = {
+                        "Date Applied": {"date": {"start": applied_day.isoformat()}},
+                    }
+                    if not followup_str:
+                        patch_props["Follow-Up Date"] = {"date": {"start": followup_day.isoformat()}}
+                    p_resp = client.patch(
+                        f"{NOTION_API_URL}/{page_id}",
+                        headers=headers,
+                        json={"properties": patch_props},
+                        timeout=15,
+                    )
+                    if getattr(p_resp, "status_code", 0) == 200:
+                        dates_stamped += 1
+                        date_applied_str = applied_day.isoformat()
+
+                # Log transition if status changed (or first capture of an active non-'New Match' status)
+                status_changed = (prev_status is not None and prev_status != current_status) or (
+                    prev_status is None and current_status in TRACKED_TRANSITION_STATUSES
+                )
+                if status_changed:
+                    event_dt = (
+                        _parse_notion_iso(date_applied_str)
+                        if (current_status == "Applied" and date_applied_str)
+                        else last_edited_dt
+                    )
+                    comp_name = (row.company if row else company_prop) or (
+                        raw_title.split(" — ", 1)[0].strip() if " — " in raw_title else "Unknown Company"
+                    )
+                    title_name = (row.title if row else raw_title) or "Target Role"
+                    session.add(
+                        ApplicationEvent(
+                            job_hash=row.job_hash if row else None,
+                            notion_page_id=page_id,
+                            company=comp_name[:128],
+                            title=title_name[:255],
+                            from_status=prev_status,
+                            to_status=current_status,
+                            event_at=event_dt,
+                            priority_tier=priority_tier,
+                            sector=sector_val,
+                            source=row.source if row else "notion",
+                            match_score=float(row.match_score if (row and row.match_score is not None) else (score_prop or 0.0)),
+                        )
+                    )
+                    events_logged += 1
+
+                if row is not None:
+                    row.notion_status = current_status
+                    if date_applied_str and row.date_applied is None:
+                        row.date_applied = _parse_notion_iso(date_applied_str)
+                    elif current_status == "Applied" and row.date_applied is None:
+                        row.date_applied = last_edited_dt
+                    if current_status in {"Interviewing", "Offer", "Declined / Rejected"} and row.date_outcome is None:
+                        row.date_outcome = last_edited_dt
+                    if current_status in PRESERVED_NOTION_STATUSES:
+                        row.status = "applied"
+
+            has_more = bool(q_data.get("has_more"))
+            next_cursor = q_data.get("next_cursor")
+
+        session.commit()
+    except Exception as exc:
+        if console:
+            console.print(f"[yellow]Warning:[/yellow] Notion transition sync error: {exc}")
+    finally:
+        if own_http:
+            client.close()
+
+    return {"scanned": scanned, "events_logged": events_logged, "dates_stamped": dates_stamped}
+
+
+def undo_last_notion_transition(
+    session: Session,
+    steps: int = 1,
+    dry_run: bool = False,
+    api_key: Optional[str] = None,
+    console: Optional[Console] = None,
+    http_session: Optional[requests.Session] = None,
+) -> List[Dict[str, Any]]:
+    """Revert the last N logged Notion board card moves back to their previous Status and clean application_events."""
+    resolved_key = (api_key if api_key is not None else os.getenv("NOTION_API_KEY", "")).strip()
+    if not resolved_key:
+        return []
+
+    events = list(
+        session.scalars(
+            select(ApplicationEvent)
+            .where(ApplicationEvent.from_status.is_not(None))
+            .order_by(desc(ApplicationEvent.id))
+            .limit(max(1, steps))
+        ).all()
+    )
+    if not events:
+        if console:
+            console.print("[yellow]No revertible board transitions found in application_events.[/yellow]")
+        return []
+
+    headers = {
+        "Authorization": f"Bearer {resolved_key}",
+        "Content-Type": "application/json",
+        "Notion-Version": NOTION_VERSION,
+    }
+    own_http = http_session is None
+    client = http_session or requests.Session()
+    reverted: List[Dict[str, Any]] = []
+
+    try:
+        for evt in events:
+            target_status = evt.from_status or "New Match"
+            record = {
+                "event_id": evt.id,
+                "notion_page_id": evt.notion_page_id,
+                "company": evt.company,
+                "title": evt.title,
+                "reverted_from": evt.to_status,
+                "reverted_to": target_status,
+                "dry_run": dry_run,
+            }
+            if not dry_run:
+                resp = client.patch(
+                    f"{NOTION_API_URL}/{evt.notion_page_id}",
+                    headers=headers,
+                    json={"properties": {"Status": {"select": {"name": target_status}}}},
+                    timeout=15,
+                )
+                if hasattr(resp, "raise_for_status"):
+                    resp.raise_for_status()
+
+                if evt.job_hash:
+                    row = session.get(JobPosting, evt.job_hash)
+                    if row is not None:
+                        row.notion_status = target_status
+                        if evt.to_status == "Applied" and target_status != "Applied":
+                            row.date_applied = None
+                        if evt.to_status in {"Interviewing", "Offer", "Declined / Rejected"}:
+                            row.date_outcome = None
+                session.delete(evt)
+            reverted.append(record)
+
+        if not dry_run:
+            session.commit()
+    finally:
+        if own_http:
+            client.close()
+
+    return reverted
+
+
+if __name__ == "__main__":
+    import argparse
+    from src.db.session import get_session_factory, init_db
+
+    parser = argparse.ArgumentParser(description="Notion sync & undo utilities.")
+    parser.add_argument("--undo", action="store_true", help="Undo the most recent logged Notion board card move.")
+    parser.add_argument("--steps", type=int, default=1, help="Number of recent card moves to undo (default: 1).")
+    parser.add_argument("--dry-run", action="store_true", help="Preview undo without modifying Notion or MySQL.")
+    cli_args = parser.parse_args()
+
+    out = Console()
+    eng = init_db()
+    SessionLocal = get_session_factory(eng)
+    with SessionLocal() as db_sess:
+        # First sync any unlogged moves from Notion before undoing
+        sync_res = sync_notion_board_transitions(db_sess, auto_stamp_dates=not cli_args.undo, console=out)
+        if cli_args.undo:
+            undone = undo_last_notion_transition(db_sess, steps=cli_args.steps, dry_run=cli_args.dry_run, console=out)
+            for item in undone:
+                prefix = "[DRY RUN] Would revert" if cli_args.dry_run else "Reverted"
+                out.print(
+                    f"[bold green]{prefix}:[/bold green] {item['company']} — {item['title']} "
+                    f"([yellow]{item['reverted_from']}[/yellow] -> [cyan]{item['reverted_to']}[/cyan])"
+                )
+            if undone and not cli_args.dry_run:
+                update_notion_board_counts_banner()
+        else:
+            out.print(f"Transition Sync Complete: {sync_res}")

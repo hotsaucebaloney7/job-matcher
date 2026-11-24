@@ -155,3 +155,38 @@ tiers:
         - pyspark
         - computer vision
         - semiconductor
+
+  # Track 2 Domain Expansion: Nuclear Energy, Power Grid Telemetry & Energy/Commodity Trading
+  # Non-penalizing additive boost (excluded from missing_groups).
+  domain_energy_commodity_boost:
+    name: "Domain Boost: Nuclear, Grid & Commodity Trading"
+    points_per_group: 12
+    max_points: 15
+    groups:
+      Nuclear & Power Systems:
+        - nuclear
+        - reactor
+        - smr
+        - small modular
+        - fusion
+        - nrc
+        - nnsa
+        - department of energy
+        - power grid
+        - scada
+        - predictive maintenance
+        - sensor telemetry
+        - utility
+      Energy & Commodity Markets:
+        - commodity trading
+        - energy trading
+        - power trading
+        - power markets
+        - wholesale power
+        - lmp
+        - pjm
+        - ercot
+        - load forecasting
+        - price forecasting
+        - time series forecasting
+        - quantitative

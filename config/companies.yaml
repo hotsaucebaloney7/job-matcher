@@ -24,6 +24,15 @@ greenhouse:
     name: Twilio
   - slug: reddit
     name: Reddit
+  # Nuclear, Energy & Commodity Trading (Verified 200 OK)
+  - slug: kairospower
+    name: Kairos Power
+  - slug: oklo
+    name: Oklo
+  - slug: amperon
+    name: Amperon
+  - slug: drweng
+    name: DRW
 
 lever:
   - slug: palantir
@@ -32,6 +41,8 @@ lever:
     name: Shield AI
   - slug: zoox
     name: Zoox
+  - slug: cfsenergy
+    name: Commonwealth Fusion Systems
 
 ashby:
   - slug: openai
@@ -54,6 +65,14 @@ ashby:
     name: ElevenLabs
   - slug: modal
     name: Modal
+  - slug: radiant
+    name: Radiant Nuclear
+
+smartrecruiters:
+  - slug: Vitol
+    name: Vitol
+  - slug: BWXT
+    name: BWX Technologies (BWXT)
 
 workday:
   - name: Booz Allen Hamilton
@@ -96,3 +115,16 @@ workday:
     tenant: mantech
     wd_instance: wd1
     site: External
+  # Nuclear & Energy Utilities (Verified 200 OK)
+  - name: GE Vernova
+    tenant: gevernova
+    wd_instance: wd5
+    site: Vernova_ExternalSite
+  - name: X-energy
+    tenant: xenergy
+    wd_instance: wd5
+    site: X-energyUS
+  - name: Duke Energy
+    tenant: dukeenergy
+    wd_instance: wd1
+    site: search

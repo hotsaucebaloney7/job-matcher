@@ -439,6 +439,180 @@ def parse_xml_job_feed(
     return matched, raw_count
 
 
+def fetch_smartrecruiters_board(
+    slug: str,
+    company_name: str,
+    session: requests.Session,
+    max_pages: int = 3,
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Fetch public unauthenticated SmartRecruiters JSON postings and fetch full details for target matches."""
+    base_url = f"https://api.smartrecruiters.com/v1/companies/{slug}/postings"
+    matched: List[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    raw_total = 0
+
+    for page_idx in range(max_pages):
+        offset = page_idx * 100
+        resp = session.get(base_url, params={"limit": 100, "offset": offset}, timeout=REQUEST_TIMEOUT_SECONDS)
+        resp.raise_for_status()
+        payload = resp.json() or {}
+        items = payload.get("content") or []
+        if not items:
+            break
+        raw_total += len(items)
+
+        for item in items:
+            job_id = str(item.get("id") or "")
+            if not job_id or job_id in seen_ids:
+                continue
+            seen_ids.add(job_id)
+
+            title = (item.get("name") or "").strip()
+            if is_excluded_title(title) or not is_target_title(title):
+                continue
+
+            loc_obj = item.get("location") or {}
+            loc_parts = [
+                str(loc_obj.get(k) or "").strip()
+                for k in ("city", "region", "country")
+                if loc_obj.get(k)
+            ]
+            if loc_obj.get("remote") is True:
+                loc_parts.insert(0, "Remote")
+            location_raw = ", ".join(loc_parts)
+            if classify_location(location_raw) is None:
+                continue
+
+            # Fetch full posting details for description text
+            desc_text = ""
+            job_url = f"https://jobs.smartrecruiters.com/{slug}/{job_id}"
+            try:
+                det_resp = session.get(f"{base_url}/{job_id}", timeout=REQUEST_TIMEOUT_SECONDS)
+                if det_resp.status_code == 200:
+                    det = det_resp.json() or {}
+                    sections = ((det.get("jobAd") or {}).get("sections") or {})
+                    section_texts = [
+                        strip_html(str((sec or {}).get("text") or ""))
+                        for sec in sections.values()
+                        if isinstance(sec, dict)
+                    ]
+                    desc_text = "\n".join(t for t in section_texts if t)
+                    job_url = det.get("applyUrl") or det.get("postingUrl") or job_url
+            except Exception:
+                pass
+
+            passed, workplace_type, job_hash, _ = evaluate_posting(
+                company=company_name,
+                title=title,
+                location_raw=location_raw,
+                description_text=desc_text,
+            )
+            if not passed:
+                continue
+
+            matched.append(
+                {
+                    "job_hash": job_hash,
+                    "source": "smartrecruiters",
+                    "external_id": job_id,
+                    "company": company_name,
+                    "title": title,
+                    "location_raw": location_raw,
+                    "workplace_type": workplace_type,
+                    "salary_min": None,
+                    "salary_max": None,
+                    "url": job_url,
+                    "description_text": desc_text,
+                    "date_posted": _parse_iso_datetime(item.get("releasedDate")),
+                }
+            )
+
+        if len(items) < 100:
+            break
+        time.sleep(0.3)
+
+    return matched, raw_total
+
+
+def fetch_oracle_hcm_board(
+    base_url: str,
+    site_number: str,
+    company_name: str,
+    session: requests.Session,
+    search_terms: Tuple[str, ...] = ("Data Scientist", "Data Engineer", "Machine Learning", "Quantitative"),
+) -> Tuple[List[Dict[str, Any]], int]:
+    """Fetch public unauthenticated Oracle Fusion Cloud Recruiting JSON requisitions."""
+    endpoint = f"{base_url.rstrip('/')}/hcmRestApi/resources/latest/recruitingCEJobRequisitions"
+    matched: List[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
+    raw_total = 0
+
+    for term in search_terms:
+        finder = f"findReqs;siteNumber={site_number},keyword={term},limit=25,offset=0"
+        resp = session.get(
+            endpoint,
+            params={"onlyData": "true", "expand": "requisitionList.secondaryLocations", "finder": finder},
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+        resp.raise_for_status()
+        items = (resp.json() or {}).get("items") or []
+        req_list = (items[0].get("requisitionList") or []) if items and isinstance(items[0], dict) else []
+        raw_total += len(req_list)
+
+        for req in req_list:
+            req_id = str(req.get("Id") or "")
+            if not req_id or req_id in seen_ids:
+                continue
+            seen_ids.add(req_id)
+
+            title = (req.get("Title") or "").strip()
+            if is_excluded_title(title) or not is_target_title(title):
+                continue
+
+            primary_loc = (req.get("PrimaryLocation") or "").strip()
+            sec_locs = [
+                (loc.get("Name") or "").strip()
+                for loc in (req.get("secondaryLocations") or [])
+                if isinstance(loc, dict) and loc.get("Name")
+            ]
+            location_raw = " | ".join(dict.fromkeys([l for l in [primary_loc] + sec_locs if l]))
+            if classify_location(location_raw) is None:
+                continue
+
+            desc_text = strip_html(
+                f"{req.get('ShortDescriptionStr') or ''}\n{req.get('ExternalDescriptionStr') or ''}"
+            )
+            passed, workplace_type, job_hash, _ = evaluate_posting(
+                company=company_name,
+                title=title,
+                location_raw=location_raw,
+                description_text=desc_text,
+            )
+            if not passed:
+                continue
+
+            job_url = f"{base_url.rstrip('/')}/hcmUI/CandidateExperience/en/sites/{site_number}/job/{req_id}"
+            matched.append(
+                {
+                    "job_hash": job_hash,
+                    "source": "oracle_hcm",
+                    "external_id": req_id,
+                    "company": company_name,
+                    "title": title,
+                    "location_raw": location_raw,
+                    "workplace_type": workplace_type,
+                    "salary_min": None,
+                    "salary_max": None,
+                    "url": job_url,
+                    "description_text": desc_text,
+                    "date_posted": _parse_iso_datetime(req.get("PostedDate")),
+                }
+            )
+        time.sleep(0.3)
+
+    return matched, raw_total
+
+
 def poll_all_ats(
     config_path: Path = DEFAULT_CONFIG_PATH,
     console: Optional[Console] = None,
@@ -530,6 +704,43 @@ def poll_all_ats(
                 )
                 if console:
                     console.print(f"[yellow]Warning:[/yellow] Failed polling Workday ({name}): {exc}")
+
+        for entry in cfg.get("smartrecruiters", []):
+            slug = entry["slug"]
+            name = entry.get("name", slug)
+            try:
+                matched, raw_count = fetch_smartrecruiters_board(slug, name, session)
+                for job in matched:
+                    deduped.setdefault(job["job_hash"], job)
+                stats.append(
+                    {"ats": "SmartRecruiters", "company": name, "raw": raw_count, "matched": len(matched), "status": "OK"}
+                )
+            except Exception as exc:
+                stats.append(
+                    {"ats": "SmartRecruiters", "company": name, "raw": 0, "matched": 0, "status": f"ERROR: {exc}"}
+                )
+                if console:
+                    console.print(f"[yellow]Warning:[/yellow] Failed polling SmartRecruiters ({name}): {exc}")
+
+        for entry in cfg.get("oracle_hcm", []):
+            name = entry.get("name", "Oracle HCM")
+            base_url = entry.get("base_url", "")
+            site_number = entry.get("site_number", "CX_1")
+            if not base_url:
+                continue
+            try:
+                matched, raw_count = fetch_oracle_hcm_board(base_url, site_number, name, session)
+                for job in matched:
+                    deduped.setdefault(job["job_hash"], job)
+                stats.append(
+                    {"ats": "Oracle HCM", "company": name, "raw": raw_count, "matched": len(matched), "status": "OK"}
+                )
+            except Exception as exc:
+                stats.append(
+                    {"ats": "Oracle HCM", "company": name, "raw": 0, "matched": 0, "status": f"ERROR: {exc}"}
+                )
+                if console:
+                    console.print(f"[yellow]Warning:[/yellow] Failed polling Oracle HCM ({name}): {exc}")
 
         for entry in cfg.get("xml_feeds", []):
             name = entry.get("name", "XML Feed")

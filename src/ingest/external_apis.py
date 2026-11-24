@@ -328,6 +328,22 @@ def poll_jsearch_rapidapi(
                 "date_posted": "week",
             },
         },
+        {
+            "label": "Nuclear & Grid Primes (Wilmington NC / NC / DMV)",
+            "params": {
+                "query": "Data Scientist Data Engineer AI ML at GE Hitachi GE Vernova Duke Energy Constellation X-energy BWXT Dominion Westinghouse TerraPower in NC VA MD DC",
+                "num_pages": "1",
+                "date_posted": "month",
+            },
+        },
+        {
+            "label": "Energy & Commodity Trading / Quantitative Analytics",
+            "params": {
+                "query": "Quantitative Analyst Data Scientist Data Engineer energy commodity power trading PJM ERCOT in Washington DC Virginia Maryland NC Remote",
+                "num_pages": "1",
+                "date_posted": "month",
+            },
+        },
     ]
 
     deduped: Dict[str, Dict[str, Any]] = {}
@@ -565,6 +581,17 @@ def poll_usajobs(
             },
             "is_remote_query": False,
         },
+        {
+            "label": "Federal Nuclear, Energy & Commodity Agencies (NRC / DOE / NNSA / FERC / CFTC)",
+            "params": {
+                "Keyword": "Data Scientist Quantitative Nuclear Energy",
+                "Organization": "DN;NU;CT;FE",
+                "PayGradeLow": "09",
+                "PayGradeHigh": "11",
+                "ResultsPerPage": "100",
+            },
+            "is_remote_query": False,
+        },
     ]
 
     deduped: Dict[str, Dict[str, Any]] = {}
@@ -755,6 +782,90 @@ def poll_usajobs(
                 )
                 if console:
                     console.print(f"[yellow]Warning:[/yellow] USAJOBS ({q['label']}) failed: {exc}")
+    finally:
+        if own_session:
+            http.close()
+
+    return list(deduped.values()), stats
+
+
+def poll_jooble(
+    api_key: Optional[str] = None,
+    session: Optional[requests.Session] = None,
+    console: Optional[Console] = None,
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Optional Jooble REST API client for Energy, Nuclear, Utility & Commodity Trading roles (requires JOOBLE_API_KEY)."""
+    resolved_key = (api_key if api_key is not None else os.getenv("JOOBLE_API_KEY", "")).strip()
+    if not resolved_key:
+        if console:
+            console.print("[dim]Jooble: Skipped (JOOBLE_API_KEY not set in .env)[/dim]")
+        return [], []
+
+    url = f"https://jooble.org/api/{resolved_key}"
+    queries = [
+        {"label": "Nuclear / Energy Data (NC & Wilmington)", "keywords": "Data Scientist OR Data Engineer nuclear OR energy", "location": "North Carolina"},
+        {"label": "Energy & Commodity Quant (DMV)", "keywords": "Data Scientist OR Quantitative Analyst energy OR commodity OR nuclear", "location": "Washington, DC"},
+        {"label": "Remote Energy / Power Trading Data", "keywords": "Data Scientist OR Data Engineer nuclear OR power trading OR commodity", "location": "Remote"},
+    ]
+
+    deduped: Dict[str, Dict[str, Any]] = {}
+    stats: List[Dict[str, Any]] = []
+    own_session = session is None
+    http = session or requests.Session()
+
+    try:
+        for q in queries:
+            try:
+                resp = http.post(
+                    url,
+                    json={"keywords": q["keywords"], "location": q["location"], "page": 1},
+                    timeout=REQUEST_TIMEOUT_SECONDS,
+                )
+                resp.raise_for_status()
+                raw_jobs = (resp.json() or {}).get("jobs") or []
+                matched_count = 0
+                for item in raw_jobs:
+                    title = (item.get("title") or "").strip()
+                    company = (item.get("company") or "Unknown Company").strip()
+                    location_raw = (item.get("location") or q["location"]).strip()
+                    link = (item.get("link") or "").strip()
+                    if not link or _is_blocked_scraper_url(link):
+                        continue
+                    description_text = strip_html(item.get("snippet") or "")
+                    posted_dt = _parse_iso_dt(item.get("updated"))
+                    if is_stale_aggregator_posting("jooble", posted_dt):
+                        continue
+                    passed, workplace_type, job_hash, _ = evaluate_posting(
+                        company=company,
+                        title=title,
+                        location_raw=location_raw,
+                        description_text=description_text,
+                    )
+                    if not passed:
+                        continue
+                    deduped.setdefault(
+                        job_hash,
+                        {
+                            "job_hash": job_hash,
+                            "source": "jooble",
+                            "external_id": str(item.get("id") or "")[:128] or None,
+                            "company": company,
+                            "title": title,
+                            "location_raw": location_raw,
+                            "workplace_type": workplace_type,
+                            "salary_min": None,
+                            "salary_max": None,
+                            "url": link[:768],
+                            "description_text": description_text,
+                            "date_posted": posted_dt,
+                        },
+                    )
+                    matched_count += 1
+                stats.append({"ats": "Jooble", "company": q["label"], "raw": len(raw_jobs), "matched": matched_count, "status": "OK"})
+            except Exception as exc:
+                stats.append({"ats": "Jooble", "company": q["label"], "raw": 0, "matched": 0, "status": f"ERROR: {exc}"})
+                if console:
+                    console.print(f"[yellow]Warning:[/yellow] Jooble ({q['label']}) failed: {exc}")
     finally:
         if own_session:
             http.close()

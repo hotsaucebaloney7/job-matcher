@@ -18,21 +18,25 @@ EXCLUDED_TITLE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# 2. Target role families (Primary + Accepted Variations + Federal Quantitative/Intelligence Series)
+# 2. Target role families (Primary + Accepted Variations + Federal Quantitative/Intelligence + Energy/Quant Series)
 TARGET_TITLE_PATTERN = re.compile(
     r"(?:data\s+scien|ai\s+engineer|artificial\s+intelligence|machine\s+learning|"
     r"ml\s+engineer|applied\s+ai|data\s+engineer|etl\s+developer|etl\s+engineer|"
     r"ml\s*ops|genai|generative\s+ai|operations\s+research\s+analyst|statistician|"
-    r"intelligence\s+analyst|cyber\s+data\s+scientist)",
+    r"intelligence\s+analyst|cyber\s+data\s+scientist|quantitative\s+analyst|"
+    r"quant(?:itative)?\s+research|quantitative\s+developer|analytics\s+engineer|"
+    r"load\s+forecast|power\s+markets?\s+analyst|energy\s+data\s+scien)",
     re.IGNORECASE,
 )
 
-# 3. Mode 2: Local Corridors — North Carolina (Raleigh/RTP/Fort Liberty) + DMV Corridor (DC/MD/VA)
+# 3. Mode 2: Local Corridors — North Carolina (Raleigh/RTP/Fort Liberty/Wilmington NC) + DMV Corridor (DC/MD/VA)
 LOCAL_RTP_PATTERN = re.compile(
-    r"\b(?:"
-    r"raleigh|cary|morrisville|rtp|research\s+triangle|garner|apex|durham|wake|"
-    r"chapel\s+hill|fort\s+liberty|fort\s+bragg|fayetteville"
-    r")\b",
+    r"(?:"
+    r"\b(?:raleigh|cary|morrisville|rtp|research\s+triangle|garner|apex|durham|wake|"
+    r"chapel\s+hill|fort\s+liberty|fort\s+bragg|fayetteville)\b|"
+    r"\bwilmington\s*,?\s*(?:nc|north\s+carolina)\b|"
+    r"\b(?:us|usa)\s*[-,]?\s*nc\s*[-,]?\s*wilmington\b"
+    r")",
     re.IGNORECASE,
 )
 
@@ -375,9 +379,16 @@ def evaluate_posting(
 
 
 _CANONICAL_LOCATION_TAG_RULES: Tuple[Tuple[re.Pattern[str], str], ...] = (
-    # North Carolina (RTP / Fort Liberty Corridor)
+    # North Carolina (RTP / Fort Liberty / Wilmington Nuclear Corridor)
     (re.compile(r"\b(?:fort\s+liberty|fort\s+bragg)\b", re.IGNORECASE), "Fort Liberty NC"),
     (re.compile(r"(?:\bfayetteville\b|\|\s*faye$)", re.IGNORECASE), "Fayetteville NC"),
+    (
+        re.compile(
+            r"(?:\bwilmington\s*,?\s*(?:nc|north\s+carolina)\b|\b(?:us|usa)\s*[-,]?\s*nc\s*[-,]?\s*wilmington\b)",
+            re.IGNORECASE,
+        ),
+        "Wilmington NC",
+    ),
     (re.compile(r"\braleigh\b", re.IGNORECASE), "Raleigh NC"),
     (re.compile(r"\bdurham\b", re.IGNORECASE), "Durham NC"),
     (re.compile(r"\bcary\b", re.IGNORECASE), "Cary NC"),
@@ -528,14 +539,52 @@ def format_posting_age(
     return f"{days}d ago (Evergreen)"
 
 
-DIRECT_EMPLOYER_SOURCES = {"workday", "usajobs", "greenhouse", "lever", "ashby", "xml_feed"}
+DIRECT_EMPLOYER_SOURCES = {
+    "workday",
+    "usajobs",
+    "greenhouse",
+    "lever",
+    "ashby",
+    "smartrecruiters",
+    "oracle_hcm",
+    "xml_feed",
+}
+
+NUCLEAR_ENERGY_COMPANY_PATTERN = re.compile(
+    r"\b(?:duke\s+energy|ge\s+vernova|ge\s+hitachi|x-?energy|kairos\s+power|oklo|"
+    r"commonwealth\s+fusion|radiant\s+nuclear|radiant|constellation\s+energy|dominion\s+energy|"
+    r"westinghouse|bwxt|bwx\s+technologies|terrapower|nextera\s+energy|southern\s+company|"
+    r"exelon|nuclear\s+regulatory|department\s+of\s+energy|nnsa|siemens\s+energy|nrg\s+energy|"
+    r"helion|pjm\s+interconnection|ercot|energy\s+information\s+administration|ferc)\b",
+    re.IGNORECASE,
+)
+
+COMMODITY_QUANT_COMPANY_PATTERN = re.compile(
+    r"\b(?:vitol|drw|amperon|trafigura|citadel|hartree|gridmatic|yes\s+energy|"
+    r"commodity\s+futures\s+trading|cftc|shell\s+energy|bp\s+energy|chevron|mercuria|"
+    r"gunvor|castleton|jane\s+street|two\s+sigma|s&p\s+global|platts)\b",
+    re.IGNORECASE,
+)
+
+NUCLEAR_ENERGY_TEXT_PATTERN = re.compile(
+    r"\b(?:nuclear|small\s+modular\s+reactor|smr\b|reactor|fusion\s+energy|triso|"
+    r"nuclear\s+regulatory|nnsa|power\s+grid|scada|substation|generation\s+fleet)\b",
+    re.IGNORECASE,
+)
+
+COMMODITY_QUANT_TEXT_PATTERN = re.compile(
+    r"\b(?:commodity\s+trading|energy\s+trading|power\s+trading|wholesale\s+power|"
+    r"locational\s+marginal\s+price|\blmp\b|\bpjm\b|\bercot\b|load\s+forecasting|"
+    r"price\s+forecasting|quantitative\s+trading|quant\s+research)\b",
+    re.IGNORECASE,
+)
 
 DEFENSE_FEDERAL_COMPANY_PATTERN = re.compile(
     r"\b(?:booz\s+allen|leidos|caci|general\s+dynamics|gdit|guidehouse|northrop\s+grumman|"
     r"mitre|rti\s+international|saic|peraton|parsons|mantech|serco|palantir|anduril|"
     r"shield\s+ai|draper|rand\b|customs\s+and\s+border|farm\s+credit|national\s+geospatial|"
     r"central\s+intelligence|defense\s+counterintelligence|department\s+of|internal\s+revenue|"
-    r"federal|u\.s\.\s+army|navy|air\s+force)\b",
+    r"federal|u\.s\.\s+army|navy|air\s+force|national\s+security\s+agency|transportation\s+safety)\b",
     re.IGNORECASE,
 )
 
@@ -544,6 +593,34 @@ LOW_ODDS_STAFFING_COMPANY_PATTERN = re.compile(
     r"nityo\s+infotech|stellar\s+professionals|ampcus|bearcloud|irvine\s+technology)\b",
     re.IGNORECASE,
 )
+
+
+def classify_sector(
+    company: Optional[str],
+    title: Optional[str] = None,
+    description_text: Optional[str] = None,
+    source: Optional[str] = None,
+) -> str:
+    """Classify a posting into one of 4 Notion Sector tags: Nuclear / Energy, Commodity / Quant, Defense / Federal, or Tech."""
+    comp = (company or "").strip()
+    ttl = (title or "").strip()
+    desc = (description_text or "")[:3000]
+    src = (source or "").strip().lower()
+    combined = f"{comp} {ttl} {desc}"
+
+    if NUCLEAR_ENERGY_COMPANY_PATTERN.search(comp):
+        return "Nuclear / Energy"
+    if COMMODITY_QUANT_COMPANY_PATTERN.search(comp):
+        return "Commodity / Quant"
+    if COMMODITY_QUANT_TEXT_PATTERN.search(f"{ttl} {desc}"):
+        return "Commodity / Quant"
+    if NUCLEAR_ENERGY_TEXT_PATTERN.search(f"{ttl} {desc}"):
+        return "Nuclear / Energy"
+    if src == "usajobs" or DEFENSE_FEDERAL_COMPANY_PATTERN.search(comp):
+        return "Defense / Federal"
+    if re.search(r"\b(?:ts/sci|top\s+secret|secret\s+clearance|dod|federal\s+government|ffrdc)\b", combined, re.IGNORECASE):
+        return "Defense / Federal"
+    return "Tech"
 
 
 def classify_priority_tier(
@@ -583,16 +660,20 @@ def classify_priority_tier(
 
     is_stretch = "stretch" in exp_str.lower() or "4+" in exp_str or "5+" in exp_str
     is_direct = src in DIRECT_EMPLOYER_SOURCES
-    is_def_fed = bool(DEFENSE_FEDERAL_COMPANY_PATTERN.search(comp))
+    is_target_org = bool(
+        DEFENSE_FEDERAL_COMPANY_PATTERN.search(comp)
+        or NUCLEAR_ENERGY_COMPANY_PATTERN.search(comp)
+        or COMMODITY_QUANT_COMPANY_PATTERN.search(comp)
+    )
 
-    # 2. Tier 1: Fresh (<=14d) direct federal/defense or high-scoring defense contractor at Primary (1-3 yr) level
+    # 2. Tier 1: Fresh (<=14d) direct federal/defense/nuclear/commodity or high-scoring target org at Primary (1-3 yr) level
     if not is_stretch:
         if is_direct and age_days <= 14 and score >= 67.0:
             return "Tier 1"
-        if is_def_fed and age_days <= 14 and score >= 85.0:
+        if is_target_org and age_days <= 14 and score >= 85.0:
             return "Tier 1"
 
-    # 3. Tier 2: Stretch (4-5 yr) roles, 15-60d direct defense/public-sector, or fresh local tech
+    # 3. Tier 2: Stretch (4-5 yr) roles, 15-60d direct defense/nuclear/public-sector, or fresh local tech
     if score >= 66.0:
         return "Tier 2"
     return "Tier 3"

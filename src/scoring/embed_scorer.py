@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from src.db.models import JobPosting
 from src.db.session import get_session_factory, get_unscored_postings, init_db
-from src.scoring.filters import has_non_local_onsite_requirement
+from src.scoring.filters import classify_sector, has_non_local_onsite_requirement
 from src.scoring.keyword_scorer import KeywordScorer
 
 DEFAULT_DATA_DIR = Path(__file__).resolve().parents[2] / "data"
@@ -379,6 +379,7 @@ def score_unscored_postings(
         row.keyword_score = kw_score
         row.semantic_score = sem_score
         row.matched_keywords = breakdown
+        row.sector = classify_sector(row.company, row.title, desc_body, row.source)
 
         if breakdown.get("experience_knockout") or fake_remote:
             row.match_score = 0.0

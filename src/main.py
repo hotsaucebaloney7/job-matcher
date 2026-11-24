@@ -10,6 +10,7 @@ from typing import Dict, List, Optional, Sequence
 from rich.console import Console
 from sqlalchemy import Engine, select, update
 
+from src.analytics.forecaster import format_banner_summary, run_offer_forecast, write_forecast_markdown
 from src.db.models import JobPosting
 from src.db.session import expire_stale_postings, get_session_factory, init_db, upsert_job_postings
 from src.exporters.markdown_digest import (
@@ -22,11 +23,19 @@ from src.exporters.markdown_digest import (
 from src.exporters.notion_sync import (
     archive_expired_notion_pages,
     is_notion_configured,
+    sync_notion_board_transitions,
     sync_to_notion,
+    update_notion_board_counts_banner,
 )
 from src.ingest.adzuna_client import poll_adzuna
 from src.ingest.ats_poller import DEFAULT_CONFIG_PATH, poll_all_ats
-from src.ingest.external_apis import poll_jsearch_rapidapi, poll_remotive, poll_the_muse, poll_usajobs
+from src.ingest.external_apis import (
+    poll_jooble,
+    poll_jsearch_rapidapi,
+    poll_remotive,
+    poll_the_muse,
+    poll_usajobs,
+)
 from src.scoring.embed_scorer import DEFAULT_DATA_DIR, EmbeddingScorer, score_unscored_postings
 from src.scoring.keyword_scorer import DEFAULT_KEYWORDS_PATH, KeywordScorer
 
@@ -80,7 +89,11 @@ def run_pipeline(
         for job in usajobs_jobs:
             merged_postings.setdefault(job["job_hash"], job)
 
-        all_stats = ats_stats + remotive_stats + muse_stats + adzuna_stats + jsearch_stats + usajobs_stats
+        jooble_jobs, jooble_stats = poll_jooble(console=out)
+        for job in jooble_jobs:
+            merged_postings.setdefault(job["job_hash"], job)
+
+        all_stats = ats_stats + remotive_stats + muse_stats + adzuna_stats + jsearch_stats + usajobs_stats + jooble_stats
         for s in all_stats:
             src_name = str(s.get("ats") or "").lower()
             if s.get("status") == "OK":
@@ -161,6 +174,12 @@ def run_pipeline(
             else (engine is None and is_notion_configured())
         )
         if should_sync_notion:
+            trans_res = sync_notion_board_transitions(session, console=out)
+            if trans_res.get("events_logged") or trans_res.get("dates_stamped"):
+                out.print(
+                    f"  • Logged [bold cyan]{trans_res['events_logged']}[/bold cyan] Notion board transitions "
+                    f"(auto-stamped {trans_res['dates_stamped']} Applied dates)."
+                )
             synced = sync_to_notion(session, min_score=min_score, console=out)
             out.print(f"  • Synced [bold green]{synced}[/bold green] new postings to Notion.")
             archived = archive_expired_notion_pages(session, expired_rows=expired_rows or None, console=out)
@@ -168,6 +187,11 @@ def run_pipeline(
                 out.print(
                     f"  • Archived [bold yellow]{archived}[/bold yellow] expired unapplied postings from Notion."
                 )
+            forecast_res = run_offer_forecast(session)
+            write_forecast_markdown(forecast_res, output_path=reports_dir / "offer_forecast.md")
+            banner_line = format_banner_summary(forecast_res)
+            update_notion_board_counts_banner(forecast_summary=banner_line)
+            out.print(f"  • [bold magenta]Offer Forecast:[/bold magenta] {banner_line}")
 
     out.rule("[bold green]Pipeline Complete[/bold green]")
     return report_path

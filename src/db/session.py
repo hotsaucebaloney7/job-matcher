@@ -13,12 +13,12 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 from rich.console import Console
 from rich.table import Table
-from sqlalchemy import Engine, create_engine, func, select
+from sqlalchemy import Engine, create_engine, func, inspect, select, text
 from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.db.models import Base, JobPosting
+from src.db.models import ApplicationEvent, Base, JobPosting
 
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 load_dotenv(dotenv_path=ENV_PATH)
@@ -69,12 +69,32 @@ def _ensure_mysql_container_running(database_url: str) -> None:
     subprocess.run(["docker", "compose", "up", "-d", "--wait"], cwd=str(project_root), check=False)
 
 
+def _ensure_schema_migrations(target_engine: Engine) -> None:
+    """Idempotently add new columns to job_postings when upgrading an existing database."""
+    insp = inspect(target_engine)
+    if not insp.has_table("job_postings"):
+        return
+
+    existing_cols = {c["name"] for c in insp.get_columns("job_postings")}
+    migrations = [
+        ("sector", "VARCHAR(32) NULL"),
+        ("notion_status", "VARCHAR(32) NULL"),
+        ("date_applied", "DATETIME NULL"),
+        ("date_outcome", "DATETIME NULL"),
+    ]
+    with target_engine.begin() as conn:
+        for col_name, col_ddl in migrations:
+            if col_name not in existing_cols:
+                conn.execute(text(f"ALTER TABLE job_postings ADD COLUMN {col_name} {col_ddl}"))
+
+
 def init_db(engine: Optional[Engine] = None) -> Engine:
-    """Create the job_postings table and indexes if they do not exist."""
+    """Create the job_postings and application_events tables and run idempotent column migrations."""
     if engine is None:
         _ensure_mysql_container_running(get_database_url())
     target_engine = engine or get_engine()
     Base.metadata.create_all(bind=target_engine)
+    _ensure_schema_migrations(target_engine)
     return target_engine
 
 
